@@ -1,4 +1,14 @@
-"""Chat mode - stateful conversations."""
+"""Chat mode - stateful conversations.
+
+This module provides a stateful chat interface that maintains conversation
+history across multiple turns. Useful for building conversational AI applications.
+
+Example:
+    >>> from elemai.chat import Chat
+    >>> chat = Chat(system="You are helpful")
+    >>> # response = chat("Hello!")  # Would call LLM
+    >>> # response2 = chat("What did I just say?")  # Maintains context
+"""
 
 from typing import Any, Callable, Dict, List, Optional, Union
 from .config import Config, get_config
@@ -7,16 +17,29 @@ from .template import MessageTemplate
 
 
 class Chat:
-    """
-    Stateful chat interface.
+    """Stateful chat interface.
 
-    Examples:
-        chat = Chat()
-        chat("Hello!")
-        chat("What's my name?")
+    Maintains conversation history across multiple turns, allowing for
+    contextual multi-turn conversations with an LLM.
 
-        chat = Chat(model="opus", system="You are a pirate")
-        chat("Ahoy!")
+    Attributes:
+        config: Configuration for LLM calls
+        system: System prompt for the conversation
+        history: List of message dictionaries (conversation history)
+        tasks: Dictionary of registered AI tasks
+        template: Optional MessageTemplate for custom formatting
+
+    Example:
+        >>> from elemai.chat import Chat
+        >>> chat = Chat(system="You are a helpful assistant")
+        >>> chat.system
+        'You are a helpful assistant'
+        >>> len(chat.history)
+        0
+
+        >>> chat2 = Chat(model="claude-sonnet-4-5-20250929", temperature=0.7)
+        >>> chat2.config.temperature
+        0.7
     """
 
     def __init__(
@@ -27,15 +50,22 @@ class Chat:
         template: Optional[Union[MessageTemplate, str]] = None,
         **config_kwargs
     ):
-        """
-        Initialize chat.
+        """Initialize chat instance.
 
         Args:
-            model: Model to use
-            system: System prompt
-            temperature: Temperature setting
+            model: Model to use (overrides global config)
+            system: System prompt for the conversation
+            temperature: Temperature setting (overrides global config)
             template: Message template or template name
             **config_kwargs: Additional config options
+
+        Example:
+            >>> from elemai.chat import Chat
+            >>> chat = Chat(model="claude-sonnet-4-5-20250929", system="Be concise")
+            >>> chat.config.model
+            'claude-sonnet-4-5-20250929'
+            >>> chat.system
+            'Be concise'
         """
         self.config = get_config().merge(
             model=model,
@@ -56,15 +86,24 @@ class Chat:
             self.template = template
 
     def __call__(self, message: str, **kwargs) -> str:
-        """
-        Send a message and get response.
+        """Send a message and get response.
+
+        Sends a message to the LLM and returns the response, automatically
+        maintaining conversation history.
 
         Args:
-            message: User message
-            **kwargs: Additional parameters
+            message: User message to send
+            **kwargs: Additional parameters (model, temperature, etc.)
 
         Returns:
-            Assistant response
+            str: Assistant's response text
+
+        Example:
+            >>> from elemai.chat import Chat
+            >>> chat = Chat(system="Echo the user's message")
+            >>> # response = chat("Hello")  # Would call LLM and return response
+            >>> len(chat.history)  # History starts empty
+            0
         """
         # Build messages
         messages = []
@@ -98,13 +137,27 @@ class Chat:
         return response_text
 
     def task(self, func: Callable) -> Callable:
-        """
-        Register an AI task that can be called from chat.
+        """Register an AI task that can be called from chat.
+
+        Decorator to register an AI-powered function as a task within
+        the chat context.
+
+        Args:
+            func: Function to register as AI task
+
+        Returns:
+            Callable: AIFunction wrapper
 
         Example:
-            @chat.task
-            def analyze(text: str) -> Analysis:
-                return _ai
+            >>> from elemai.chat import Chat
+            >>> from elemai.sentinel import _ai
+            >>> chat = Chat()
+            >>> @chat.task
+            ... def analyze(text: str) -> str:
+            ...     '''Analyze the text'''
+            ...     return _ai
+            >>> 'analyze' in chat.tasks
+            True
         """
         from .task import AIFunction
 
@@ -117,38 +170,96 @@ class Chat:
         return ai_func
 
     def reset(self):
-        """Clear conversation history."""
+        """Clear conversation history.
+
+        Removes all messages from history, starting fresh.
+
+        Example:
+            >>> from elemai.chat import Chat
+            >>> chat = Chat()
+            >>> chat.history.append({"role": "user", "content": "test"})
+            >>> len(chat.history)
+            1
+            >>> chat.reset()
+            >>> len(chat.history)
+            0
+        """
         self.history = []
 
     def get_history(self) -> List[Dict[str, str]]:
-        """Get conversation history."""
+        """Get conversation history.
+
+        Returns:
+            list: Copy of the conversation history
+
+        Example:
+            >>> from elemai.chat import Chat
+            >>> chat = Chat()
+            >>> history = chat.get_history()
+            >>> len(history)
+            0
+            >>> chat.history.append({"role": "user", "content": "hi"})
+            >>> history = chat.get_history()
+            >>> len(history)
+            1
+        """
         return self.history.copy()
 
     def set_system(self, system: str):
-        """Update system prompt."""
+        """Update system prompt.
+
+        Args:
+            system: New system prompt
+
+        Example:
+            >>> from elemai.chat import Chat
+            >>> chat = Chat(system="Old prompt")
+            >>> chat.set_system("New prompt")
+            >>> chat.system
+            'New prompt'
+        """
         self.system = system
 
     def add_task(self, task: Callable, trigger: Optional[str] = None):
-        """
-        Add a task that can be used in conversation.
+        """Add a task that can be used in conversation.
 
         Args:
             task: AI task function
             trigger: Description of when to trigger (for documentation)
+
+        Example:
+            >>> from elemai.chat import Chat
+            >>> from elemai.sentinel import _ai
+            >>> chat = Chat()
+            >>> def my_task() -> str:
+            ...     '''Task'''
+            ...     return _ai
+            >>> chat.add_task(my_task)
+            >>> 'my_task' in chat.tasks
+            True
         """
         self.tasks[task.__name__] = task
 
 
 def chat(message: str) -> str:
-    """
-    Simple stateful chat function.
+    """Simple stateful chat function.
 
-    Maintains a global conversation state.
+    Convenience function that maintains a global conversation state.
+    Useful for quick interactive sessions without managing a Chat instance.
+
+    Args:
+        message: User message to send
+
+    Returns:
+        str: Assistant's response
 
     Example:
-        from elemai import chat
-        chat("Hello!")
-        chat("What's my name?")
+        >>> from elemai.chat import chat, _global_chat
+        >>> # First call initializes global chat
+        >>> # response = chat("Hello!")  # Would call LLM
+        >>> # response2 = chat("Hi again")  # Uses same conversation
+        >>> _global_chat is None  # Initially None
+        True
     """
     global _global_chat
 
