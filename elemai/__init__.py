@@ -2,5 +2,32 @@
 
 __version__ = "0.1.0"
 
-# Import main components here when created
-# from .core import YourMainClass
+# Core components
+from .sentinel import _ai
+from .task import ai
+from .chat import Chat, chat
+from .config import configure, set_config, get_config
+from .template import templates, template_fn, MessageTemplate, Field
+
+__all__ = [
+    # Sentinel
+    '_ai',
+
+    # Decorators
+    'ai',
+
+    # Chat
+    'Chat',
+    'chat',
+
+    # Configuration
+    'configure',
+    'set_config',
+    'get_config',
+
+    # Templates
+    'templates',
+    'template_fn',
+    'MessageTemplate',
+    'Field',
+]
