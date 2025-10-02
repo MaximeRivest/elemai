@@ -218,22 +218,34 @@ print(preview.config)
 
 ## Supported Providers
 
-- Anthropic (Claude) - default
-- OpenAI (GPT-4, GPT-3.5)
+elemai uses [litellm](https://github.com/BerriAI/litellm) as its backend, giving you access to **100+ LLM providers** including:
 
-Configure provider:
+- Anthropic (Claude) - default
+- OpenAI (GPT-4, GPT-4o, GPT-3.5)
+- Google (Gemini)
+- Cohere
+- Azure OpenAI
+- AWS Bedrock
+- And many more!
+
+Just use the model name and litellm handles the rest:
 
 ```python
-set_config(provider="openai", model="gpt-4-turbo")
+set_config(model="gpt-4-turbo")
+set_config(model="gemini-pro")
+set_config(model="command-nightly")
 ```
 
 ## Model Aliases
 
+Convenient shortcuts for common models:
+
 ```python
-set_config(model="sonnet")  # claude-sonnet-4
-set_config(model="opus")    # claude-opus-4
-set_config(model="haiku")   # claude-haiku-4
+set_config(model="sonnet")  # claude-3-5-sonnet-20241022
+set_config(model="opus")    # claude-3-opus-20240229
+set_config(model="haiku")   # claude-3-haiku-20240307
 set_config(model="gpt4")    # gpt-4-turbo
+set_config(model="gpt4o")   # gpt-4o
 ```
 
 ## Development

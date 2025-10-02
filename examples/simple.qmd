@@ -1,0 +1,6 @@
+
+```{python}
+import elemai as lmai
+
+lmai.chat("hello")
+```

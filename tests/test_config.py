@@ -8,9 +8,8 @@ def test_default_config():
     """Test default configuration"""
     config = Config()
 
-    assert config.model == "claude-sonnet-4"
+    assert config.model == "claude-3-5-sonnet-20241022"
     assert config.temperature == 0.7
-    assert config.provider == "anthropic"
 
 
 def test_config_copy():
@@ -63,9 +62,10 @@ def test_configure_context_manager():
 
 def test_model_aliases():
     """Test model alias resolution"""
-    assert resolve_model("sonnet") == "claude-sonnet-4"
-    assert resolve_model("opus") == "claude-opus-4"
-    assert resolve_model("haiku") == "claude-haiku-4"
+    assert resolve_model("sonnet") == "claude-3-5-sonnet-20241022"
+    assert resolve_model("opus") == "claude-3-opus-20240229"
+    assert resolve_model("haiku") == "claude-3-haiku-20240307"
+    assert resolve_model("gpt4o") == "gpt-4o"
 
     # Unknown models pass through
     assert resolve_model("custom-model") == "custom-model"

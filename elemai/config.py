@@ -9,11 +9,10 @@ from contextlib import contextmanager
 class Config:
     """Global configuration for elemai."""
 
-    model: str = "claude-sonnet-4"
+    model: str = "claude-3-5-sonnet-20241022"
     temperature: float = 0.7
     max_tokens: Optional[int] = None
     api_key: Optional[str] = None
-    provider: str = "anthropic"  # "anthropic" or "openai"
     default_template: Optional[str] = None
     extra: Dict[str, Any] = field(default_factory=dict)
 
@@ -24,7 +23,6 @@ class Config:
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             api_key=self.api_key,
-            provider=self.provider,
             default_template=self.default_template,
             extra=self.extra.copy()
         )
@@ -74,11 +72,13 @@ def configure(**kwargs):
 
 
 # Model aliases for convenience
+# litellm uses model names like: claude-3-5-sonnet-20241022, gpt-4, etc.
 MODEL_ALIASES = {
-    'sonnet': 'claude-sonnet-4',
-    'opus': 'claude-opus-4',
-    'haiku': 'claude-haiku-4',
+    'sonnet': 'claude-3-5-sonnet-20241022',
+    'opus': 'claude-3-opus-20240229',
+    'haiku': 'claude-3-haiku-20240307',
     'gpt4': 'gpt-4-turbo',
+    'gpt4o': 'gpt-4o',
     'gpt35': 'gpt-3.5-turbo',
 }
 
