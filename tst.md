@@ -2880,3 +2880,952 @@ This keeps the simple message array format but adds the programmatic control you
 
 Should we now design how Chat mode works with this system?
 
+# user 8
+
+complete implementation of the above
+
+# ai 8
+
+# Complete LLM Library Implementation
+
+```python
+"""
+llm.py - A productive library for working with LLMs
+Inspired by functai, claudette, dspy, and ggplot2/dplyr ergonomics
+"""
+
+import inspect
+import json
+import re
+import yaml
+from typing import Any, Callable, Dict, List, Optional, Union, get_type_hints, get_origin, get_args
+from dataclasses import dataclass, is_dataclass, fields as dataclass_fields
+from enum import Enum
+from functools import wraps
+import anthropic
+import os
+
+
+# ============================================================================
+# Configuration
+# ============================================================================
+
+class Config:
+    """Global configuration"""
+    def __init__(self):
+        self.model = "claude-sonnet-4-20250514"
+        self.temperature = 0.7
+        self.max_tokens = 4096
+        self.api_key = os.environ.get("ANTHROPIC_API_KEY")
+        self.client = None
+        self.default_messages = None
+        
+    def set(self, **kwargs):
+        """Set configuration values"""
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+        # Recreate client if API key changed
+        if 'api_key' in kwargs:
+            self.client = None
+            
+    def get_client(self):
+        """Get or create Anthropic client"""
+        if self.client is None:
+            self.client = anthropic.Anthropic(api_key=self.api_key)
+        return self.client
+
+_global_config = Config()
+
+def configure(**kwargs):
+    """Configure global settings or return context manager for temporary config"""
+    if kwargs:
+        _global_config.set(**kwargs)
+        return None
+    
+    # Return context manager
+    class ConfigContext:
+        def __init__(self, **overrides):
+            self.overrides = overrides
+            self.old_values = {}
+            
+        def __enter__(self):
+            for key, value in self.overrides.items():
+                self.old_values[key] = getattr(_global_config, key)
+                setattr(_global_config, key, value)
+            return self
+            
+        def __exit__(self, *args):
+            for key, value in self.old_values.items():
+                setattr(_global_config, key, value)
+    
+    return lambda **overrides: ConfigContext(**overrides)
+
+
+# ============================================================================
+# Template Functions Registry
+# ============================================================================
+
+_template_functions = {}
+
+def template_fn(func):
+    """Register a template function"""
+    _template_functions[func.__name__] = func
+    return func
+
+
+# Built-in template functions
+@template_fn
+def inputs(input_dict: dict, style='default', exclude=None, only=None) -> str:
+    """Render input fields"""
+    fields = dict(input_dict)
+    
+    if only:
+        fields = {k: v for k, v in fields.items() if k in only}
+    if exclude:
+        fields = {k: v for k, v in fields.items() if k not in exclude}
+    
+    if style == 'yaml':
+        return yaml.dump(fields, default_flow_style=False)
+    elif style == 'json':
+        return json.dumps(fields, indent=2)
+    elif style == 'list':
+        return '\n'.join(f"- {k}: {type(v).__name__}" for k, v in fields.items())
+    elif style == 'markdown':
+        return '\n'.join(f"**{k}**: {v}" for k, v in fields.items())
+    else:  # default
+        return '\n'.join(f"{k}: {v}" for k, v in fields.items())
+
+
+@template_fn
+def outputs(output_dict: dict, style='default') -> str:
+    """Render output fields"""
+    if style == 'schema':
+        schema = {}
+        for name, field_info in output_dict.items():
+            type_hint = field_info.get('type', str)
+            schema[name] = _type_to_schema_str(type_hint)
+        return json.dumps(schema, indent=2)
+    elif style == 'list':
+        lines = []
+        for name, field_info in output_dict.items():
+            type_hint = field_info.get('type', str)
+            desc = field_info.get('description', '')
+            lines.append(f"- {name}: {_type_name(type_hint)}")
+            if desc:
+                lines.append(f"  ({desc})")
+        return '\n'.join(lines)
+    else:  # default
+        lines = []
+        for name, field_info in output_dict.items():
+            type_hint = field_info.get('type', str)
+            desc = field_info.get('description', '')
+            line = f"{name}: {_type_name(type_hint)}"
+            if desc:
+                line += f" - {desc}"
+            lines.append(line)
+        return '\n'.join(lines)
+
+
+@template_fn
+def schema(type_hint) -> str:
+    """Render schema for a type"""
+    if hasattr(type_hint, 'model_json_schema'):
+        # Pydantic model
+        return json.dumps(type_hint.model_json_schema(), indent=2)
+    elif is_dataclass(type_hint):
+        # Dataclass
+        schema = {}
+        for field in dataclass_fields(type_hint):
+            schema[field.name] = _type_to_schema_str(field.type)
+        return json.dumps(schema, indent=2)
+    else:
+        return _type_to_schema_str(type_hint)
+
+
+def _type_name(type_hint) -> str:
+    """Get readable type name"""
+    if hasattr(type_hint, '__name__'):
+        return type_hint.__name__
+    elif hasattr(type_hint, '_name'):
+        return type_hint._name
+    else:
+        return str(type_hint)
+
+
+def _type_to_schema_str(type_hint) -> str:
+    """Convert type hint to schema string"""
+    origin = get_origin(type_hint)
+    
+    if origin is list:
+        args = get_args(type_hint)
+        if args:
+            return f"array of {_type_name(args[0])}"
+        return "array"
+    elif origin is dict:
+        return "object"
+    elif origin is tuple:
+        args = get_args(type_hint)
+        return f"tuple[{', '.join(_type_name(a) for a in args)}]"
+    elif hasattr(type_hint, '__name__'):
+        return type_hint.__name__
+    else:
+        return str(type_hint)
+
+
+# ============================================================================
+# Message Template Rendering
+# ============================================================================
+
+class MessageTemplate:
+    """Handles message template rendering with functions and variables"""
+    
+    def __init__(self, messages: List[Union[dict, str]]):
+        self.messages = messages
+        
+    def render(self, context: dict) -> List[dict]:
+        """Render messages with context"""
+        rendered = []
+        
+        for msg in self.messages:
+            if isinstance(msg, str):
+                # String shorthand - expand to messages
+                expanded = self._expand_string(msg, context)
+                rendered.extend(expanded)
+            else:
+                # Standard message dict
+                rendered_msg = {
+                    'role': msg['role'],
+                    'content': self._render_content(msg['content'], context)
+                }
+                rendered.append(rendered_msg)
+        
+        return rendered
+    
+    def _render_content(self, content: str, context: dict) -> str:
+        """Render content with function calls and variables"""
+        # First pass: evaluate function calls {func(...)}
+        content = self._eval_functions(content, context)
+        
+        # Second pass: substitute simple variables {var}
+        content = self._substitute_vars(content, context)
+        
+        return content
+    
+    def _eval_functions(self, content: str, context: dict) -> str:
+        """Evaluate {function(...)} calls in content"""
+        pattern = r'\{(\w+)\((.*?)\)\}'
+        
+        def replace_func(match):
+            func_name = match.group(1)
+            args_str = match.group(2)
+            
+            if func_name in _template_functions:
+                # Parse and evaluate arguments
+                args, kwargs = self._parse_call_args(args_str, context)
+                
+                # Call the function
+                result = _template_functions[func_name](*args, **kwargs)
+                return str(result)
+            
+            # Not a function call, leave it
+            return match.group(0)
+        
+        return re.sub(pattern, replace_func, content)
+    
+    def _parse_call_args(self, args_str: str, context: dict):
+        """Parse function call arguments"""
+        if not args_str.strip():
+            return [], {}
+        
+        # Simple parsing - could be more sophisticated
+        args = []
+        kwargs = {}
+        
+        # Split by comma (naive - doesn't handle nested commas)
+        parts = [p.strip() for p in args_str.split(',')]
+        
+        for part in parts:
+            if '=' in part:
+                # Keyword argument
+                key, val = part.split('=', 1)
+                kwargs[key.strip()] = self._eval_arg(val.strip(), context)
+            else:
+                # Positional argument
+                args.append(self._eval_arg(part, context))
+        
+        return args, kwargs
+    
+    def _eval_arg(self, arg: str, context: dict):
+        """Evaluate a single argument"""
+        # Remove quotes if string literal
+        if (arg.startswith('"') and arg.endswith('"')) or \
+           (arg.startswith("'") and arg.endswith("'")):
+            return arg[1:-1]
+        
+        # Try to get from context
+        if arg in context:
+            return context[arg]
+        
+        # Try as literal
+        try:
+            return eval(arg)
+        except:
+            return arg
+    
+    def _substitute_vars(self, content: str, context: dict) -> str:
+        """Substitute {var} and {obj.attr} style variables"""
+        pattern = r'\{([^}]+)\}'
+        
+        def replace_var(match):
+            var_path = match.group(1)
+            
+            # Skip if it looks like a function call (already processed)
+            if '(' in var_path:
+                return match.group(0)
+            
+            # Handle dot notation: inputs.text
+            parts = var_path.split('.')
+            value = context
+            
+            try:
+                for part in parts:
+                    if isinstance(value, dict):
+                        value = value[part]
+                    else:
+                        value = getattr(value, part)
+                return str(value)
+            except (KeyError, AttributeError):
+                # Variable not found, leave it
+                return match.group(0)
+        
+        return re.sub(pattern, replace_var, content)
+    
+    def _expand_string(self, s: str, context: dict):
+        """Expand string shorthand to messages"""
+        # Could support special syntax here
+        return [{'role': 'user', 'content': s}]
+
+
+# ============================================================================
+# AI Sentinel
+# ============================================================================
+
+class _AISentinel:
+    """Sentinel object representing AI-generated value"""
+    def __init__(self, description: str = ""):
+        self.description = description
+        
+    def __getitem__(self, description: str):
+        """Allow _ai["description"] syntax"""
+        return _AISentinel(description)
+    
+    def __repr__(self):
+        return f"_ai[{self.description!r}]" if self.description else "_ai"
+
+_ai = _AISentinel()
+
+
+# ============================================================================
+# Function Introspection
+# ============================================================================
+
+def introspect_function(func: Callable) -> dict:
+    """Analyze function to extract structure"""
+    sig = inspect.signature(func)
+    type_hints = get_type_hints(func)
+    source = inspect.getsource(func)
+    
+    # Extract function info
+    info = {
+        'name': func.__name__,
+        'docstring': inspect.getdoc(func) or "",
+        'instruction': (inspect.getdoc(func) or "").split('\n')[0],
+        'inputs': {},
+        'outputs': {},
+        'return_type': type_hints.get('return', str)
+    }
+    
+    # Input parameters
+    for param_name, param in sig.parameters.items():
+        if param_name in ['demos', 'all', 'debug']:
+            continue
+        info['inputs'][param_name] = {
+            'type': type_hints.get(param_name, str),
+            'default': param.default if param.default != inspect.Parameter.empty else None,
+            'required': param.default == inspect.Parameter.empty
+        }
+    
+    # Output fields from function body
+    # Look for: variable: type = _ai["description"]
+    output_pattern = r'(\w+):\s*([^\s=]+)\s*=\s*_ai(?:\["([^"]+)"\])?'
+    for match in re.finditer(output_pattern, source):
+        var_name = match.group(1)
+        type_str = match.group(2)
+        description = match.group(3) or ""
+        
+        # Try to resolve type from hints
+        local_hints = {}
+        try:
+            exec(f"from typing import *\n{type_str}", {}, local_hints)
+            resolved_type = local_hints.get(type_str, str)
+        except:
+            resolved_type = str
+        
+        info['outputs'][var_name] = {
+            'type': resolved_type,
+            'description': description
+        }
+    
+    return info
+
+
+# ============================================================================
+# Default Message Templates
+# ============================================================================
+
+def create_default_messages(func_info: dict) -> List[dict]:
+    """Create default message template for a function"""
+    has_outputs = bool(func_info['outputs'])
+    
+    if has_outputs:
+        # Multi-step with reasoning
+        return [
+            {
+                'role': 'system',
+                'content': """Task: {instruction}
+
+Output these fields:
+{outputs(outputs)}"""
+            },
+            {
+                'role': 'user',
+                'content': '{inputs(inputs)}'
+            }
+        ]
+    else:
+        # Simple single output
+        return [
+            {
+                'role': 'system',
+                'content': '{instruction}'
+            },
+            {
+                'role': 'user',
+                'content': '{inputs(inputs)}'
+            }
+        ]
+
+
+# ============================================================================
+# Response Parsing
+# ============================================================================
+
+def parse_response(content: str, func_info: dict, return_all: bool = False):
+    """Parse LLM response into structured output"""
+    outputs = func_info['outputs']
+    return_type = func_info['return_type']
+    
+    # If no intermediate outputs, just parse the content as the return value
+    if not outputs:
+        return _parse_value(content, return_type)
+    
+    # Try to parse as JSON first
+    try:
+        data = json.loads(content)
+        if return_all:
+            # Return all fields
+            result = type('Prediction', (), {})()
+            for key in outputs:
+                setattr(result, key, data.get(key))
+            if 'result' not in outputs:
+                setattr(result, 'result', data.get('result'))
+            return result
+        else:
+            # Just return the final result
+            return _parse_value(data.get('result', content), return_type)
+    except json.JSONDecodeError:
+        pass
+    
+    # Try to extract fields from text
+    extracted = {}
+    for field_name, field_info in outputs.items():
+        # Look for field in various formats
+        patterns = [
+            rf'{field_name}:\s*(.+?)(?:\n\n|\n[A-Z]|$)',
+            rf'<{field_name}>(.+?)</{field_name}>',
+            rf'"{field_name}":\s*"(.+?)"'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+            if match:
+                extracted[field_name] = match.group(1).strip()
+                break
+    
+    if return_all:
+        result = type('Prediction', (), {})()
+        for key, value in extracted.items():
+            setattr(result, key, value)
+        # The final result is the remaining text or last field
+        final = extracted.get('result', content)
+        setattr(result, 'result', _parse_value(final, return_type))
+        return result
+    else:
+        # Return just the final value
+        final = extracted.get('result', content)
+        return _parse_value(final, return_type)
+
+
+def _parse_value(value: str, type_hint):
+    """Parse a value according to type hint"""
+    if isinstance(value, str):
+        value = value.strip()
+    
+    # Already correct type
+    if isinstance(value, type_hint):
+        return value
+    
+    # Pydantic model
+    if hasattr(type_hint, 'model_validate_json'):
+        try:
+            return type_hint.model_validate_json(value)
+        except:
+            return type_hint.model_validate(json.loads(value))
+    
+    # Dataclass
+    if is_dataclass(type_hint):
+        data = json.loads(value) if isinstance(value, str) else value
+        return type_hint(**data)
+    
+    # Basic types
+    if type_hint == str:
+        return str(value)
+    elif type_hint == int:
+        return int(value)
+    elif type_hint == float:
+        return float(value)
+    elif type_hint == bool:
+        return value.lower() in ('true', 'yes', '1') if isinstance(value, str) else bool(value)
+    elif get_origin(type_hint) == list:
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except:
+                # Try to parse as lines
+                return [line.strip() for line in value.split('\n') if line.strip()]
+        return list(value)
+    elif get_origin(type_hint) == dict:
+        if isinstance(value, str):
+            return json.loads(value)
+        return dict(value)
+    
+    # Return as-is
+    return value
+
+
+# ============================================================================
+# AI Function Wrapper
+# ============================================================================
+
+class AIFunction:
+    """Wraps a function to make it AI-powered"""
+    
+    def __init__(self, func: Callable, messages: Optional[List] = None, 
+                 model: Optional[str] = None, temperature: Optional[float] = None,
+                 stateful: bool = False, tools: Optional[List[Callable]] = None,
+                 **config):
+        self.func = func
+        self.func_info = introspect_function(func)
+        self.config = config
+        
+        # Override config
+        if model:
+            self.config['model'] = model
+        if temperature is not None:
+            self.config['temperature'] = temperature
+        
+        # Message template
+        if messages is None:
+            messages = create_default_messages(self.func_info)
+        self.messages = MessageTemplate(messages)
+        
+        # State management
+        self.stateful = stateful
+        self.history = []
+        
+        # Tools
+        self.tools = tools or []
+        
+    def __call__(self, *args, **kwargs):
+        """Execute the AI function"""
+        # Parse special arguments
+        return_all = kwargs.pop('all', False)
+        debug = kwargs.pop('debug', False)
+        demos = kwargs.pop('demos', [])
+        
+        # Bind arguments
+        sig = inspect.signature(self.func)
+        bound = sig.bind_partial(*args, **kwargs)
+        bound.apply_defaults()
+        input_values = dict(bound.arguments)
+        
+        # Build context for template rendering
+        context = {
+            'fn_name': self.func_info['name'],
+            'instruction': self.func_info['instruction'],
+            'doc': self.func_info['docstring'],
+            'inputs': input_values,
+            'outputs': self.func_info['outputs'],
+            'demos': demos,
+            'history': self.history if self.stateful else []
+        }
+        
+        # Render messages
+        messages = self.messages.render(context)
+        
+        # Add history for stateful
+        if self.stateful and self.history:
+            # Insert history before last message
+            messages = messages[:-1] + self.history + [messages[-1]]
+        
+        if debug:
+            print("=== RENDERED MESSAGES ===")
+            for msg in messages:
+                print(f"{msg['role'].upper()}: {msg['content'][:200]}...")
+            print()
+        
+        # Call LLM
+        response = self._call_llm(messages)
+        
+        if debug:
+            print("=== RAW RESPONSE ===")
+            print(response[:500])
+            print()
+        
+        # Parse response
+        result = parse_response(response, self.func_info, return_all)
+        
+        # Update history for stateful
+        if self.stateful:
+            self.history.append({'role': 'user', 'content': input_values.get('message', str(input_values))})
+            self.history.append({'role': 'assistant', 'content': response})
+        
+        return result
+    
+    def _call_llm(self, messages: List[dict]) -> str:
+        """Call the LLM API"""
+        client = _global_config.get_client()
+        
+        # Merge config
+        call_config = {
+            'model': _global_config.model,
+            'temperature': _global_config.temperature,
+            'max_tokens': _global_config.max_tokens,
+        }
+        call_config.update(self.config)
+        
+        # Make API call
+        response = client.messages.create(
+            model=call_config['model'],
+            max_tokens=call_config['max_tokens'],
+            temperature=call_config['temperature'],
+            messages=messages
+        )
+        
+        return response.content[0].text
+    
+    def render(self, **kwargs) -> str:
+        """Preview rendered messages"""
+        context = {
+            'fn_name': self.func_info['name'],
+            'instruction': self.func_info['instruction'],
+            'doc': self.func_info['docstring'],
+            'inputs': kwargs,
+            'outputs': self.func_info['outputs'],
+            'demos': kwargs.pop('demos', []),
+            'history': self.history if self.stateful else []
+        }
+        
+        messages = self.messages.render(context)
+        
+        # Pretty print
+        result = []
+        for msg in messages:
+            result.append(f"[{msg['role'].upper()}]")
+            result.append(msg['content'])
+            result.append("")
+        
+        return '\n'.join(result)
+    
+    def to_messages(self, **kwargs) -> List[dict]:
+        """Get rendered messages as API format"""
+        context = {
+            'fn_name': self.func_info['name'],
+            'instruction': self.func_info['instruction'],
+            'doc': self.func_info['docstring'],
+            'inputs': kwargs,
+            'outputs': self.func_info['outputs'],
+            'demos': kwargs.pop('demos', []),
+            'history': self.history if self.stateful else []
+        }
+        
+        return self.messages.render(context)
+
+
+# ============================================================================
+# AI Decorator
+# ============================================================================
+
+def ai(func: Optional[Callable] = None, *, messages: Optional[List] = None,
+       model: Optional[str] = None, temperature: Optional[float] = None,
+       stateful: bool = False, tools: Optional[List[Callable]] = None,
+       **config):
+    """Decorator to create AI-powered function"""
+    
+    def decorator(f):
+        return AIFunction(
+            f, 
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            stateful=stateful,
+            tools=tools,
+            **config
+        )
+    
+    if func is None:
+        # Called with arguments: @ai(...)
+        return decorator
+    else:
+        # Called without arguments: @ai
+        return decorator(func)
+
+
+# ============================================================================
+# Chat Interface
+# ============================================================================
+
+class Chat:
+    """Stateful chat interface"""
+    
+    def __init__(self, model: Optional[str] = None, 
+                 system: Optional[str] = None,
+                 temperature: Optional[float] = None,
+                 **config):
+        self.history = []
+        self.config = config
+        
+        if model:
+            self.config['model'] = model
+        if temperature is not None:
+            self.config['temperature'] = temperature
+        if system:
+            self.config['system'] = system
+            
+    def __call__(self, message: str) -> str:
+        """Send a message and get response"""
+        messages = []
+        
+        # Add system message if configured
+        if 'system' in self.config:
+            messages.append({
+                'role': 'system',
+                'content': self.config['system']
+            })
+        
+        # Add history
+        messages.extend(self.history)
+        
+        # Add new message
+        messages.append({
+            'role': 'user',
+            'content': message
+        })
+        
+        # Call LLM
+        client = _global_config.get_client()
+        
+        call_config = {
+            'model': _global_config.model,
+            'temperature': _global_config.temperature,
+            'max_tokens': _global_config.max_tokens,
+        }
+        call_config.update(self.config)
+        
+        # Filter out system from config
+        api_config = {k: v for k, v in call_config.items() 
+                     if k in ['model', 'temperature', 'max_tokens']}
+        
+        response = client.messages.create(
+            messages=messages,
+            **api_config
+        )
+        
+        result = response.content[0].text
+        
+        # Update history
+        self.history.append({'role': 'user', 'content': message})
+        self.history.append({'role': 'assistant', 'content': result})
+        
+        return result
+    
+    def reset(self):
+        """Clear conversation history"""
+        self.history = []
+
+
+# ============================================================================
+# Presets
+# ============================================================================
+
+class presets:
+    """Built-in message templates"""
+    
+    simple = [
+        {'role': 'system', 'content': '{instruction}'},
+        {'role': 'user', 'content': '{inputs(inputs)}'}
+    ]
+    
+    reasoning = [
+        {
+            'role': 'system',
+            'content': """Task: {instruction}
+
+Think step by step and provide your reasoning.
+
+Expected outputs:
+{outputs(outputs)}"""
+        },
+        {'role': 'user', 'content': '{inputs(inputs)}'}
+    ]
+    
+    structured = [
+        {
+            'role': 'system',
+            'content': """Task: {instruction}
+
+Think through this carefully:
+1. First analyze the problem
+2. Consider your approach  
+3. Draft a solution
+4. Critique and refine
+
+Output:
+{outputs(outputs, style='schema')}"""
+        },
+        {'role': 'user', 'content': '{inputs(inputs)}'}
+    ]
+    
+    extraction = [
+        {
+            'role': 'system',
+            'content': """Extract structured data accurately.
+
+Expected schema:
+{outputs(outputs, style='schema')}"""
+        },
+        {'role': 'user', 'content': '{inputs(inputs)}'}
+    ]
+
+
+# ============================================================================
+# Example Usage (if run as script)
+# ============================================================================
+
+if __name__ == "__main__":
+    # Configure
+    configure(
+        api_key=os.environ.get("ANTHROPIC_API_KEY"),
+        model="claude-sonnet-4-20250514"
+    )
+    
+    # Simple example
+    @ai
+    def summarize(text: str) -> str:
+        """Summarize the text concisely"""
+        return _ai
+    
+    print("=== SIMPLE EXAMPLE ===")
+    result = summarize("FunctAI is a library that makes working with LLMs feel like regular Python programming.")
+    print(result)
+    print()
+    
+    # With reasoning
+    @ai
+    def analyze(text: str) -> str:
+        """Analyze the sentiment"""
+        thinking: str = _ai["Think about the sentiment carefully"]
+        return _ai
+    
+    print("=== WITH REASONING ===")
+    result = analyze("I love this library! It's so intuitive.")
+    print(result)
+    print()
+    
+    # Get all outputs
+    full = analyze("I love this library!", all=True)
+    print("Thinking:", full.thinking)
+    print("Result:", full.result)
+    print()
+    
+    # Custom messages
+    @ai(
+        messages=[
+            {
+                'role': 'system',
+                'content': 'You are a concise assistant. Output in JSON.'
+            },
+            {
+                'role': 'user',
+                'content': '{inputs(inputs, style="yaml")}'
+            }
+        ]
+    )
+    def classify(text: str) -> str:
+        """Classify as positive or negative"""
+        return _ai
+    
+    print("=== CUSTOM MESSAGES ===")
+    result = classify("This is amazing!")
+    print(result)
+    print()
+    
+    # Chat mode
+    print("=== CHAT MODE ===")
+    chat = Chat(system="You are a helpful assistant")
+    print(chat("Hi, my name is Alex"))
+    print(chat("What's my name?"))
+    print()
+    
+    # Preview rendering
+    print("=== PREVIEW RENDERING ===")
+    print(summarize.render(text="example text"))
+```
+
+This is a complete, single-file implementation! It includes:
+
+✅ **Core Features:**
+- `@ai` decorator for tasks
+- `_ai` sentinel for outputs
+- Intermediate output fields with descriptions
+- Message template system with `{inputs()}`, `{outputs()}` functions
+- Custom `@template_fn` for user-defined renderers
+- Built-in template presets
+- Chat interface with history
+- Configuration cascade (global, context, per-function)
+- Debug and preview modes
+
+✅ **Template Functions:**
+- `inputs(style='yaml'|'json'|'list'|'markdown', exclude=[...], only=[...])`
+- `outputs(style='schema'|'list')`
+- `schema(Type)`
+- Custom functions via `@template_fn`
+
+✅ **Advanced:**
+- Response parsing (JSON, text extraction)
+- Type conversion (Pydantic, dataclass, primitives)
+- Stateful conversations
+- Function introspection
+- All outputs mode (`all=True`)
+
+Want me to add anything else or shall we test it out?

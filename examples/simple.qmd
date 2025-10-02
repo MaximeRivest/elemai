@@ -4,3 +4,8 @@ import elemai as lmai
 
 lmai.chat("hello")
 ```
+
+
+```{python}
+
+```

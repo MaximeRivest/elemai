@@ -238,14 +238,26 @@ set_config(model="command-nightly")
 
 ## Model Aliases
 
-Convenient shortcuts for common models:
+Convenient shortcuts for the latest models (as of 2025):
 
 ```python
-set_config(model="sonnet")  # claude-3-5-sonnet-20241022
-set_config(model="opus")    # claude-3-opus-20240229
-set_config(model="haiku")   # claude-3-haiku-20240307
-set_config(model="gpt4")    # gpt-4-turbo
-set_config(model="gpt4o")   # gpt-4o
+# Claude 4 (latest)
+set_config(model="sonnet")      # claude-sonnet-4-20250514
+set_config(model="opus")        # claude-opus-4-20250514
+set_config(model="haiku")       # claude-3-5-haiku-20241022
+
+# Claude 3.7 & 3.5
+set_config(model="sonnet-3.7")  # claude-3-7-sonnet-20250219
+set_config(model="sonnet-3.5")  # claude-3-5-sonnet-20241022
+
+# OpenAI
+set_config(model="gpt4o")       # gpt-4o
+set_config(model="gpt4o-mini")  # gpt-4o-mini
+set_config(model="gpt4")        # gpt-4-turbo
+
+# Google Gemini
+set_config(model="gemini-pro")  # gemini-2.5-pro
+set_config(model="gemini-flash") # gemini-2.5-flash
 ```
 
 ## Development
