@@ -1,0 +1,230 @@
+---
+title: "Result API - functai-inspired design"
+format:
+  html:
+    code-fold: false
+  md:
+    variant: gfm
+---
+
+This document explains elemai's Result API, which is inspired by functai's clean and intuitive design.
+
+## Basic Concept
+
+When you define an AI function with `@ai`, the behavior depends on how you call it:
+
+1. **Default behavior**: Returns just the final result value (clean and simple)
+2. **With `all=True`**: Returns a `Result` object containing all intermediate outputs
+
+## Example 1: Simple Function (No Intermediate Outputs)
+
+```{python}
+from elemai import ai, _ai, Result
+
+@ai
+def analyze_sentiment(text: str) -> str:
+    """Analyze the sentiment of the text"""
+    return _ai
+```
+
+When you call this function, it returns just the string:
+
+```{python}
+#| eval: false
+result = analyze_sentiment("This is amazing")
+# result = "positive"
+print(result)  # "positive"
+print(type(result))  # <class 'str'>
+```
+
+## Example 2: Function with Intermediate Thinking
+
+```{python}
+@ai
+def analyze_sentiment_detailed(text: str) -> str:
+    """Analyze the sentiment of the text"""
+    thinking: str = _ai["Think about the emotional tone"]
+    return _ai
+```
+
+### Default behavior: returns just the final result
+
+```{python}
+#| eval: false
+result = analyze_sentiment_detailed("This is amazing")
+# result = "positive"
+# The 'thinking' step happened internally but isn't returned
+```
+
+### With all=True: get everything
+
+```{python}
+#| eval: false
+full_result = analyze_sentiment_detailed("This is amazing", all=True)
+# full_result is a Result object with both fields
+
+print(full_result.thinking)
+# "The text uses positive words like 'amazing' indicating positive sentiment"
+
+print(full_result.result)
+# "positive"
+```
+
+## Example 3: Multiple Intermediate Outputs
+
+```{python}
+@ai
+def solve_problem(problem: str) -> float:
+    """Solve a math problem"""
+    understanding: str = _ai["First, understand the problem"]
+    approach: str = _ai["Explain your approach"]
+    answer: float = _ai["The final numeric answer"]
+    return answer
+```
+
+### Default: just the answer
+
+```{python}
+#| eval: false
+answer = solve_problem("What is 15 * 23?")
+# answer = 345.0
+print(answer)  # 345.0
+```
+
+### With all=True: get the reasoning process
+
+```{python}
+#| eval: false
+full = solve_problem("What is 15 * 23?", all=True)
+
+print(full.understanding)
+# "The problem asks us to multiply 15 by 23"
+
+print(full.approach)
+# "I will multiply these two numbers step by step"
+
+print(full.result)
+# 345.0
+```
+
+## Result Object Representations
+
+The `Result` object has multiple useful representations:
+
+```{python}
+# Create example Result objects
+r1 = Result(result="positive")
+r2 = Result(
+    thinking="The text uses positive words",
+    sentiment="positive",
+    result="positive"
+)
+```
+
+### repr() - Shows all fields
+
+```{python}
+print(repr(r1))
+```
+
+```{python}
+print(repr(r2))
+```
+
+### str() - Adapts to content
+
+For single field, returns just the value:
+```{python}
+print(str(r1))
+```
+
+For multiple fields, shows each field on a line:
+```{python}
+print(str(r2))
+```
+
+### Jupyter Markdown
+
+In Jupyter notebooks, Result objects render nicely:
+
+```{python}
+# This would render as formatted markdown in Jupyter
+print(r2._repr_markdown_())
+```
+
+## Why This Design?
+
+This API design provides the best of both worlds:
+
+### 1. Clean default behavior
+Most of the time you just want the answer:
+```python
+answer = solve_problem("2 + 2")  # Just returns 4
+```
+
+### 2. Full access when needed
+For debugging, inspection, or using intermediate outputs:
+```python
+full = solve_problem("2 + 2", all=True)
+print(full.understanding)  # See the reasoning
+print(full.approach)       # See the approach
+print(full.result)         # Get the answer
+```
+
+### 3. Nice representations
+Whether you're in a terminal, script, or Jupyter notebook, Result objects display cleanly.
+
+## Comparison to Before
+
+Before this improvement, intermediate outputs returned an unhelpful object:
+
+```python
+# Old behavior (bad):
+>>> result
+<elemai.task.Result at 0x759a91c55be0>  # Not useful!
+
+# New behavior (good):
+>>> result
+Result(thinking='...', result='positive')  # Shows everything!
+
+>>> str(result)
+thinking: ...
+result: positive
+```
+
+This matches the design philosophy of functai, where the API is intuitive and the representations are always useful.
+
+## Complete Example
+
+Here's a complete example showing the workflow:
+
+```{python}
+@ai
+def research_question(question: str) -> str:
+    """Research and answer a question"""
+    background: str = _ai["Gather relevant background information"]
+    analysis: str = _ai["Analyze the information"]
+    answer: str = _ai["Provide a clear, concise answer"]
+    return answer
+```
+
+```{python}
+#| eval: false
+# Simple usage - just get the answer
+answer = research_question("What is photosynthesis?")
+print(answer)
+
+# Detailed usage - see the full reasoning
+full = research_question("What is photosynthesis?", all=True)
+print("Background:", full.background)
+print("Analysis:", full.analysis)
+print("Answer:", full.answer)
+```
+
+## Summary
+
+- **Default**: `result = func(input)` returns just the final value
+- **All fields**: `full = func(input, all=True)` returns Result object
+- **Access fields**: `full.thinking`, `full.result`, etc.
+- **Nice reprs**: Works great in terminal, scripts, and Jupyter
+- **functai-inspired**: Clean, intuitive API design

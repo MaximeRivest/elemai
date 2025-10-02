@@ -55,6 +55,91 @@ class Preview:
     config: Config
 
 
+class Result:
+    """Result object containing AI function outputs.
+
+    This object holds both the final result and any intermediate outputs
+    (like thinking steps). It provides a nice string representation and
+    attribute access to all fields.
+
+    Attributes:
+        result: The final return value
+        **fields: Any intermediate output fields (e.g., thinking, reasoning)
+
+    Example:
+        >>> r = Result(result="positive", thinking="The text has happy words")
+        >>> r.result
+        'positive'
+        >>> r.thinking
+        'The text has happy words'
+        >>> # With multiple fields, str() shows all fields
+        >>> print(str(r))  # doctest: +NORMALIZE_WHITESPACE
+        result: positive
+        thinking: The text has happy words
+        >>> # With single field, str() shows just the value
+        >>> r2 = Result(result="positive")
+        >>> str(r2)
+        'positive'
+    """
+
+    def __init__(self, **fields):
+        """Initialize Result with fields.
+
+        Args:
+            **fields: Named fields including 'result' and any extras
+        """
+        for name, value in fields.items():
+            setattr(self, name, value)
+        self._fields = fields
+
+    def __repr__(self) -> str:
+        """Return detailed repr showing all fields.
+
+        Returns:
+            str: Representation showing all fields
+        """
+        if len(self._fields) == 1 and 'result' in self._fields:
+            # Just the result, show it simply
+            return f"Result(result={self._fields['result']!r})"
+
+        # Show all fields
+        field_strs = [f"{k}={v!r}" for k, v in self._fields.items()]
+        return f"Result({', '.join(field_strs)})"
+
+    def __str__(self) -> str:
+        """Return string representation.
+
+        If only 'result' field exists, return its string value.
+        Otherwise return the full repr.
+
+        Returns:
+            str: String representation
+        """
+        if len(self._fields) == 1 and 'result' in self._fields:
+            return str(self._fields['result'])
+
+        # For multiple fields, show them nicely
+        parts = []
+        for name, value in self._fields.items():
+            parts.append(f"{name}: {value}")
+        return '\n'.join(parts)
+
+    def _repr_markdown_(self) -> str:
+        """Provide markdown representation for Jupyter notebooks.
+
+        Returns:
+            str: Markdown formatted representation
+        """
+        if len(self._fields) == 1 and 'result' in self._fields:
+            return f"**Result:** {self._fields['result']}"
+
+        # Show all fields in markdown
+        parts = ["### AI Function Result\n"]
+        for name, value in self._fields.items():
+            parts.append(f"**{name}:** {value}\n")
+        return '\n'.join(parts)
+
+
 class AIFunction:
     """Wrapper for an AI-powered function.
 
@@ -160,8 +245,8 @@ class AIFunction:
         output_fields = self.metadata['output_fields']
 
         if len(output_fields) > 1:
-            # Multiple outputs - use reasoning template
-            return MessageTemplate(templates.reasoning)
+            # Multiple outputs - use markdown fields template for better LLM compatibility
+            return MessageTemplate(templates.markdown_fields)
         else:
             # Simple case
             return MessageTemplate(templates.simple)
@@ -208,15 +293,18 @@ class AIFunction:
 
         return context
 
-    def _parse_output(self, text: str, output_fields: List[Dict]) -> Any:
+    def _parse_output(self, text: str, output_fields: List[Dict], return_all: bool = False) -> Any:
         """Parse LLM output to extract structured data.
 
         Args:
             text: Raw LLM response
             output_fields: List of expected output fields
+            return_all: If True, return Result object with all fields.
+                       If False, return just the final result value.
 
         Returns:
-            Parsed output (structured or raw text)
+            Parsed output (Result object if return_all=True or multiple fields,
+            otherwise just the result value)
 
         Example:
             >>> from elemai.task import AIFunction
@@ -232,20 +320,47 @@ class AIFunction:
         if len(output_fields) == 1 and output_fields[0]['name'] == 'result':
             # Single output - try to parse to return type
             return_type = self.metadata['return_type']
-            return self._parse_to_type(text, return_type)
+            value = self._parse_to_type(text, return_type)
 
-        # Multiple outputs - extract each field
-        result = {}
+            if return_all:
+                # Wrap in Result object even for single field
+                return Result(result=value)
+            return value
+
+        # Multiple outputs - try JSON first, then fall back to field extraction
+        parsed = {}
+
+        # Try to parse as JSON first (for json_extraction template)
+        try:
+            # Look for JSON object in the text
+            json_match = re.search(r'\{.*\}', text, re.DOTALL)
+            if json_match:
+                json_data = json.loads(json_match.group(0))
+                # Extract fields from JSON
+                for field in output_fields:
+                    if field['name'] in json_data:
+                        parsed[field['name']] = self._parse_to_type(
+                            str(json_data[field['name']]),
+                            field['type']
+                        )
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # If JSON parsing didn't work or didn't get all fields, fall back to field extraction
         for field in output_fields:
-            value = self._extract_field(text, field['name'], field['type'])
-            result[field['name']] = value
+            if field['name'] not in parsed:
+                value = self._extract_field(text, field['name'], field['type'])
+                parsed[field['name']] = value
 
-        # If only one field and it's 'result', return just the value
-        if len(result) == 1 and 'result' in result:
-            return result['result']
+        # Create Result object
+        result_obj = Result(**parsed)
 
-        # Return as object with attributes
-        return type('Result', (), result)()
+        # If return_all is False and we have a 'result' field, return just that
+        if not return_all and 'result' in parsed:
+            return parsed['result']
+
+        # Otherwise return the full Result object
+        return result_obj
 
     def _extract_field(self, text: str, field_name: str, field_type: type) -> Any:
         """Extract a specific field from text.
@@ -269,11 +384,18 @@ class AIFunction:
             >>> result
             42
         """
-        # Try common patterns
+        # Try common patterns (in order of specificity)
         patterns = [
-            rf'{field_name}:\s*(.*?)(?:\n\n|\n[A-Z]|$)',
+            # XML-style tags: <field_name>value</field_name>
             rf'<{field_name}>(.*?)</{field_name}>',
+            # Markdown headers: ## field_name \n value (using lookahead)
+            rf'#{{1,6}}\s*{field_name}\s*\n(.*?)(?=\n#{{1,6}}|\Z)',
+            # Labeled with colon: field_name: value
+            rf'{field_name}:\s*(.*?)(?:\n\n|\n[A-Z#]|$)',
+            # JSON-style quotes: "field_name": "value"
             rf'"{field_name}":\s*"(.*?)"',
+            # **Markdown bold**: **field_name** value
+            rf'\*\*{field_name}\*\*\s*(.*?)(?:\n\n|\n\*\*|$)',
         ]
 
         for pattern in patterns:
@@ -355,10 +477,12 @@ class AIFunction:
 
         Args:
             *args: Positional arguments matching function signature
-            **kwargs: Keyword arguments matching function signature
+            **kwargs: Keyword arguments matching function signature.
+                     Special keyword 'all': If True, return Result object with all fields.
 
         Returns:
-            Parsed LLM response matching return type
+            Parsed LLM response. By default returns just the final result value.
+            If all=True, returns a Result object containing all intermediate outputs.
 
         Example:
             >>> from elemai.task import AIFunction
@@ -368,7 +492,11 @@ class AIFunction:
             ...     return _ai
             >>> ai_func = AIFunction(greet)
             >>> # result = ai_func("Alice")  # Would call LLM
+            >>> # full_result = ai_func("Alice", all=True)  # Returns Result object
         """
+        # Extract special 'all' parameter
+        return_all = kwargs.pop('all', False)
+
         # Convert positional args to kwargs
         input_fields = self.metadata['input_fields']
         for i, arg in enumerate(args):
@@ -401,7 +529,7 @@ class AIFunction:
 
         # Parse output
         output_fields = self.metadata['output_fields']
-        result = self._parse_output(text, output_fields)
+        result = self._parse_output(text, output_fields, return_all=return_all)
 
         return result
 

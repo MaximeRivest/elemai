@@ -1,0 +1,360 @@
+---
+title: "elemai Basic Usage Examples"
+format:
+  html:
+    code-fold: false
+  md:
+    variant: gfm
+---
+
+This document demonstrates the basic usage patterns of elemai, an AI LLM coding library.
+
+## Example 1: Simple AI function
+
+The most basic usage - define a function and let the AI implement it:
+
+```{python}
+from elemai import ai, _ai
+
+@ai
+def summarize(text: str) -> str:
+    """Summarize the text in one sentence"""
+    return _ai
+
+# Call it like a normal function
+result = summarize("""
+FunctAI: The Function-is-the-Prompt Paradigm
+
+Welcome to FunctAI. This library reimagines how Python developers
+integrate Large Language Models (LLMs) into their applications. FunctAI
+allows you to treat AI models as reliable, typed Python functions,
+abstracting away the complexities of prompt engineering and output
+parsing.
+
+The core philosophy of FunctAI is simple yet powerful:
+
+The function definition *is* the prompt, and the function body *is*
+the program definition.
+
+By leveraging Python's native features—docstrings for instructions, type
+hints for structure, and variable assignments for logic flow—you can
+define sophisticated AI behaviors with minimal boilerplate.
+
+FunctAI is built on the powerful DSPy framework, unlocking
+advanced strategies like Chain-of-Thought, automatic optimization, and
+agentic tool usage through an ergonomic, decorator-based API.
+""")
+print(result)
+```
+
+## Example 2: With intermediate reasoning
+
+Use intermediate `_ai` assignments to get chain-of-thought reasoning:
+
+```{python}
+from elemai import ai, _ai
+from typing import Literal
+
+@ai
+def analyze_sentiment(text: str) -> Literal["positive", "negative", "neutral"]:
+    """Analyze the sentiment of the text"""
+    thinking: str = _ai["Think about the emotional tone"]
+    return _ai
+
+# By default, only returns the final result
+result = analyze_sentiment("This is amazing")
+print(f"Result: {result}")
+
+# Use all=True to get all intermediate outputs
+full = analyze_sentiment("This is amazing", all=True)
+print(f"Thinking: {full.thinking}")
+print(f"Result: {full.result}")
+```
+
+## Example 3: Structured output with Pydantic
+
+Return complex structured data using Pydantic models:
+
+```{python}
+from elemai import ai, _ai
+from pydantic import BaseModel
+
+class Analysis(BaseModel):
+    sentiment: str
+    themes: list[str]
+    summary: str
+
+@ai
+def deep_analysis(text: str) -> Analysis:
+    """Perform deep analysis of the text"""
+    thinking: str = _ai["Analyze the text carefully"]
+    return _ai
+
+result = deep_analysis("I love this product! It's innovative and well-designed.")
+print(f"Sentiment: {result.sentiment}")
+print(f"Themes: {result.themes}")
+print(f"Summary: {result.summary}")
+```
+
+## Example 4: Custom messages template
+
+Override the default template with your own messages:
+
+```{python}
+from elemai import ai, _ai
+
+@ai(
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant"},
+        {"role": "user", "content": "Text: {text}\n\nPlease summarize this."},
+    ]
+)
+def custom_summarize(text: str) -> str:
+    """Summarize with custom template"""
+    return _ai
+
+result = custom_summarize("Long article about quantum computing...")
+print(result)
+```
+
+## Example 5: Using template functions
+
+Use built-in template functions for dynamic rendering:
+
+```{python}
+from elemai import ai, _ai
+from pydantic import BaseModel
+
+class Analysis(BaseModel):
+    sentiment: str
+    themes: list[str]
+    summary: str
+
+@ai(
+    messages=[
+        {
+            "role": "system",
+            "content": "Task: {instruction}\n\nExpected output:\n{outputs(style='schema')}"
+        },
+        {"role": "user", "content": "{inputs(style='yaml')}"},
+    ]
+)
+def structured_task(text: str, context: str) -> Analysis:
+    """Analyze text with context"""
+    return _ai
+
+result = structured_task(
+    text="Great product!",
+    context="Customer review"
+)
+print(result)
+```
+
+## Example 6: Assistant prefill
+
+Prefill the assistant's response to guide the output format:
+
+```{python}
+from elemai import ai, _ai
+
+@ai(
+    messages=[
+        {"role": "system", "content": "You are concise"},
+        {"role": "user", "content": "{text}"},
+        {"role": "assistant", "content": "Here's my analysis:\n\n1. "},
+    ]
+)
+def prefilled_analysis(text: str) -> str:
+    """Analysis with prefilled start"""
+    return _ai
+
+result = prefilled_analysis("The economy is growing steadily.")
+print(result)
+# Result will start with "Here's my analysis:\n\n1. ..."
+```
+
+## Example 7: Chat mode
+
+Use the Chat class for stateful conversations:
+
+```{python}
+from elemai import Chat
+
+chat = Chat(system="You are a helpful assistant")
+
+response1 = chat("My name is Alice")
+print(f"Bot: {response1}")
+
+response2 = chat("What's my name?")
+print(f"Bot: {response2}")  # Will remember: "Your name is Alice"
+```
+
+## Example 8: Chat with custom model
+
+Configure the chat with specific model settings:
+
+```{python}
+from elemai import Chat
+
+chat = Chat(
+    model="claude-opus-4-20250514",
+    temperature=0.3,
+    system="You are very precise"
+)
+
+result = chat("Explain quantum computing in one sentence")
+print(result)
+```
+
+## Example 9: Multiple outputs with all= parameter
+
+Access intermediate reasoning steps:
+
+```{python}
+from elemai import ai, _ai
+
+@ai
+def solve_problem(problem: str) -> float:
+    """Solve a math problem"""
+    understanding: str = _ai["First, understand the problem"]
+    approach: str = _ai["Explain your approach"]
+    answer: float = _ai["The final numeric answer"]
+    return answer
+
+# Simple usage - just the answer
+answer = solve_problem("What is 15 * 23?")
+print(f"Answer: {answer}")
+
+# Detailed usage - see the reasoning
+full = solve_problem("What is 15 * 23?", all=True)
+print(f"Understanding: {full.understanding}")
+print(f"Approach: {full.approach}")
+print(f"Answer: {full.result}")
+```
+
+## Example 10: Configuration override
+
+Use context manager to override config temporarily:
+
+```{python}
+from elemai import ai, _ai, configure
+
+@ai
+def task(input: str) -> str:
+    """Do something"""
+    return _ai
+
+# Normal usage with default config
+result1 = task("input 1")
+print(f"Result 1: {result1}")
+
+# Override for specific calls
+with configure(model="claude-haiku-4-20250514", temperature=0):
+    result2 = task("input 2")  # Uses Haiku with temp 0
+    print(f"Result 2 (with Haiku): {result2}")
+
+# Back to default config
+result3 = task("input 3")
+print(f"Result 3: {result3}")
+```
+
+## Example 11: Preview prompts
+
+See what will be sent to the LLM without actually calling it:
+
+```{python}
+from elemai import ai, _ai
+from pydantic import BaseModel
+
+class Analysis(BaseModel):
+    sentiment: str
+    themes: list[str]
+    summary: str
+
+@ai(
+    messages=[
+        {
+            "role": "system",
+            "content": "Task: {instruction}\n\nExpected output:\n{outputs(style='schema')}"
+        },
+        {"role": "user", "content": "{inputs(style='yaml')}"},
+    ]
+)
+def structured_task(text: str, context: str) -> Analysis:
+    """Analyze text with context"""
+    return _ai
+
+preview = structured_task.preview(
+    text="Great product!",
+    context="Customer review"
+)
+
+print("Prompt that will be sent:")
+print(preview.prompt)
+
+print("\nMessages:")
+for msg in preview.messages:
+    print(f"{msg['role']}: {msg['content'][:100]}...")
+```
+
+## Example 12: Accessing function metadata
+
+Inspect the function's metadata:
+
+```{python}
+from elemai import ai, _ai
+from typing import Literal
+
+@ai
+def analyze_sentiment(text: str) -> Literal["positive", "negative", "neutral"]:
+    """Analyze the sentiment of the text"""
+    thinking: str = _ai["Think about the emotional tone"]
+    return _ai
+
+print("Function name:", analyze_sentiment.metadata['fn_name'])
+print("Instruction:", analyze_sentiment.metadata['instruction'])
+print("Input fields:", [f['name'] for f in analyze_sentiment.metadata['input_fields']])
+print("Output fields:", [f['name'] for f in analyze_sentiment.metadata['output_fields']])
+```
+
+## Example 13: Result Object Features
+
+The Result object has nice representations:
+
+```{python}
+from elemai import Result
+
+# Single field
+r1 = Result(result="positive")
+print("Single field repr:", repr(r1))
+print("Single field str:", str(r1))
+
+# Multiple fields
+r2 = Result(
+    thinking="Analysis of the text",
+    sentiment="positive",
+    result="positive"
+)
+print("\nMultiple fields repr:", repr(r2))
+print("\nMultiple fields str:")
+print(str(r2))
+
+# Markdown representation (useful in Jupyter)
+print("\nMarkdown representation:")
+print(r2._repr_markdown_())
+```
+
+## Summary
+
+elemai provides a clean, intuitive API for working with LLMs:
+
+- **@ai decorator**: Transform functions into AI-powered operations
+- **_ai sentinel**: Mark outputs to be generated by the AI
+- **all= parameter**: Access intermediate reasoning steps
+- **Result object**: Nice representations in all contexts
+- **Chat class**: Stateful conversations
+- **Configuration**: Global, contextual, and per-function settings
+- **Templates**: Flexible prompt customization
+- **Preview**: Inspect prompts before sending
+
+This design is inspired by functai's function-is-the-prompt paradigm.

@@ -455,7 +455,7 @@ class MessageTemplate:
         # Use safe substitution to avoid KeyError on missing variables
         try:
             content = content.format(**context)
-        except KeyError as e:
+        except (KeyError, AttributeError) as e:
             # Try with nested access (inputs.text)
             content = self._format_with_nested_access(content, context)
 
@@ -641,6 +641,17 @@ class Templates:
             "content": "Extract structured data as JSON.\n\nSchema:\n{outputs(style='schema')}"
         },
         {"role": "user", "content": "{inputs()}"}
+    ]
+
+    markdown_fields = [
+        {
+            "role": "system",
+            "content": "{instruction}\n\nProvide your response with clearly labeled fields:\n{outputs()}"
+        },
+        {
+            "role": "user",
+            "content": "{inputs()}\n\nRespond with each field clearly marked."
+        }
     ]
 
     structured = [
