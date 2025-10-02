@@ -1,4 +1,17 @@
-"""Configuration system for elemai."""
+"""Configuration system for elemai.
+
+This module provides global configuration management for the elemai library,
+including model selection, temperature settings, and API keys.
+
+Example:
+    >>> from elemai import set_config, configure
+    >>> # Set global configuration
+    >>> set_config(model="opus", temperature=0.5)
+    >>>
+    >>> # Temporary override
+    >>> with configure(model="haiku"):
+    ...     pass  # Uses haiku model here
+"""
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
@@ -7,9 +20,25 @@ from contextlib import contextmanager
 
 @dataclass
 class Config:
-    """Global configuration for elemai."""
+    """Configuration dataclass for elemai settings.
 
-    model: str = "claude-sonnet-4-20250514"
+    Attributes:
+        model: The LLM model to use (default: claude-sonnet-4.5)
+        temperature: Sampling temperature 0-1 (default: 0.7)
+        max_tokens: Maximum tokens to generate (default: None/provider default)
+        api_key: API key for the provider (default: None/uses env vars)
+        default_template: Default message template to use (default: None)
+        extra: Additional provider-specific parameters (default: {})
+
+    Example:
+        >>> config = Config(model="gpt4o", temperature=0.3)
+        >>> config.model
+        'gpt4o'
+        >>> config.temperature
+        0.3
+    """
+
+    model: str = "claude-sonnet-4.5"
     temperature: float = 0.7
     max_tokens: Optional[int] = None
     api_key: Optional[str] = None
@@ -17,7 +46,18 @@ class Config:
     extra: Dict[str, Any] = field(default_factory=dict)
 
     def copy(self):
-        """Create a copy of this config."""
+        """Create an independent copy of this configuration.
+
+        Returns:
+            Config: A new Config instance with the same values
+
+        Example:
+            >>> config1 = Config(model="sonnet")
+            >>> config2 = config1.copy()
+            >>> config2.model = "opus"
+            >>> config1.model  # Original unchanged
+            'sonnet'
+        """
         return Config(
             model=self.model,
             temperature=self.temperature,
@@ -28,7 +68,22 @@ class Config:
         )
 
     def merge(self, **kwargs):
-        """Create a new config with updated values."""
+        """Create a new config with updated values.
+
+        Args:
+            **kwargs: Configuration parameters to update
+
+        Returns:
+            Config: A new Config instance with merged values
+
+        Example:
+            >>> config = Config(model="sonnet", temperature=0.7)
+            >>> new_config = config.merge(temperature=0.3, max_tokens=1000)
+            >>> new_config.temperature
+            0.3
+            >>> new_config.model  # Unchanged values preserved
+            'sonnet'
+        """
         new_config = self.copy()
         for key, value in kwargs.items():
             if value is not None:
@@ -41,12 +96,38 @@ _global_config = Config()
 
 
 def get_config() -> Config:
-    """Get the current global configuration."""
+    """Get the current global configuration.
+
+    Returns:
+        Config: The current global configuration instance
+
+    Example:
+        >>> from elemai.config import Config
+        >>> # Create a fresh config to show default
+        >>> fresh_config = Config()
+        >>> fresh_config.model
+        'claude-sonnet-4.5'
+    """
     return _global_config
 
 
 def set_config(**kwargs):
-    """Update the global configuration."""
+    """Update the global configuration.
+
+    This modifies the global config that will be used by all AI functions
+    unless overridden locally.
+
+    Args:
+        **kwargs: Configuration parameters to update (model, temperature, etc.)
+
+    Example:
+        >>> from elemai import set_config, get_config
+        >>> set_config(model="opus", temperature=0.5)
+        >>> get_config().model
+        'opus'
+        >>> get_config().temperature
+        0.5
+    """
     global _global_config
     for key, value in kwargs.items():
         if hasattr(_global_config, key):
@@ -55,12 +136,25 @@ def set_config(**kwargs):
 
 @contextmanager
 def configure(**kwargs):
-    """
-    Temporarily override configuration.
+    """Temporarily override configuration within a context.
+
+    The configuration changes are automatically reverted when exiting
+    the context manager.
+
+    Args:
+        **kwargs: Configuration parameters to temporarily override
+
+    Yields:
+        Config: The temporarily modified configuration
 
     Example:
-        with configure(model="opus", temperature=0):
-            result = task(input)
+        >>> from elemai import configure, get_config
+        >>> original = get_config().model
+        >>> with configure(model="haiku", temperature=0):
+        ...     assert get_config().model == "haiku"
+        ...     assert get_config().temperature == 0
+        >>> get_config().model == original  # Restored
+        True
     """
     global _global_config
     old_config = _global_config
@@ -74,16 +168,10 @@ def configure(**kwargs):
 # Model aliases for convenience
 # Based on latest models as of 2025
 MODEL_ALIASES = {
-    # Claude 4 models (latest)
-    'sonnet': 'claude-sonnet-4-20250514',
-    'opus': 'claude-opus-4-20250514',
-    'haiku': 'claude-3-5-haiku-20241022',
-
-    # Claude 3.7
-    'sonnet-3.7': 'claude-3-7-sonnet-20250219',
-
-    # Claude 3.5 (previous generation)
-    'sonnet-3.5': 'claude-3-5-sonnet-20241022',
+    # Claude 4.5 (latest)
+    'sonnet': 'claude-sonnet-4.5',
+    'opus': 'claude-opus-4.5',
+    'haiku': 'claude-haiku-4.5',
 
     # OpenAI GPT models
     'gpt4o': 'gpt-4o',
@@ -99,5 +187,23 @@ MODEL_ALIASES = {
 
 
 def resolve_model(model: str) -> str:
-    """Resolve a model alias to its full name."""
+    """Resolve a model alias to its full name.
+
+    If the model string is an alias (like 'sonnet'), returns the full
+    model name. Otherwise, returns the input unchanged.
+
+    Args:
+        model: Model name or alias
+
+    Returns:
+        str: Full model name
+
+    Example:
+        >>> resolve_model("sonnet")
+        'claude-sonnet-4.5'
+        >>> resolve_model("gpt4o")
+        'gpt-4o'
+        >>> resolve_model("my-custom-model")  # Unknown alias passes through
+        'my-custom-model'
+    """
     return MODEL_ALIASES.get(model, model)
