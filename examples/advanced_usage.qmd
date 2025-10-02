@@ -1,0 +1,451 @@
+---
+title: "elemai Advanced Usage Examples"
+format:
+  html:
+    code-fold: false
+  md:
+    variant: gfm
+---
+
+This document demonstrates advanced usage patterns and techniques for elemai.
+
+## Example 1: Custom template function
+
+Create custom template functions to dynamically format inputs:
+
+```{python}
+from elemai import ai, _ai
+from typing import List
+
+def render_with_emphasis(inputs: dict, highlight: List[str] = None) -> str:
+    """Render inputs with highlighted fields"""
+    lines = []
+    for k, v in inputs.items():
+        if highlight and k in highlight:
+            lines.append(f">>> {k.upper()}: {v}")
+        else:
+            lines.append(f"    {k}: {v}")
+    return '\n'.join(lines)
+
+@ai(
+    messages=[
+        {"role": "system", "content": "Analyze carefully"},
+        {"role": "user", "content": "{render_with_emphasis(inputs, highlight=['text'])}"},
+    ]
+)
+def highlighted_analysis(text: str, context: str) -> str:
+    """Analysis with highlighted inputs"""
+    return _ai
+
+# Register the custom template function
+highlighted_analysis.template.register_function('render_with_emphasis', render_with_emphasis)
+
+
+print(highlighted_analysis.render(
+    text="This is important",
+    context="background info"
+))
+```
+
+    SYSTEM:
+    Analyze carefully
+
+    USER:
+    >>> TEXT: This is important
+        context: background info
+
+## Example 2: Complex structured output with dataclasses
+
+Use dataclasses for structured outputs:
+
+```{python}
+from elemai import ai, _ai
+from dataclasses import dataclass
+from typing import List
+
+@dataclass
+class DetailedAnalysis:
+    """Detailed text analysis"""
+    sentiment: str
+    confidence: float
+    key_themes: List[str]
+    entities: List[str]
+    summary: str
+
+@ai
+def comprehensive_analysis(text: str) -> DetailedAnalysis:
+    """Perform comprehensive text analysis"""
+    reasoning: str = _ai["Think through all aspects"]
+    entity_extraction: str = _ai["Identify key entities"]
+    return _ai
+
+result = comprehensive_analysis("Apple Inc. released amazing new products today!")
+print(f"Sentiment: {result.sentiment}")
+print(f"Confidence: {result.confidence}")
+print(f"Themes: {result.key_themes}")
+print(f"Entities: {result.entities}")
+print(f"Summary: {result.summary}")
+```
+
+    Sentiment: positive
+    Confidence: 0.95
+    Themes: ['product launch', 'technology innovation', 'corporate announcement', 'consumer electronics']
+    Entities: [{'text': 'Apple Inc.', 'type': 'organization', 'category': 'technology_company'}, {'text': 'new products', 'type': 'product', 'category': 'consumer_electronics'}, {'text': 'today', 'type': 'temporal', 'category': 'time_reference'}]
+    Summary: Apple Inc. announced the release of new products, described enthusiastically as amazing, indicating a significant product launch event occurring today.
+
+## Example 3: Multi-step reasoning with structured fields
+
+Break down complex reasoning into multiple steps:
+
+```{python}
+from elemai import ai, _ai
+
+@ai
+def solve_with_verification(problem: str) -> str:
+    """Solve problem with full reasoning and verification"""
+    understanding: str = _ai["First, understand what the problem is asking"]
+    approach: str = _ai["Describe your approach to solving it"]
+    solution: str = _ai["Work through the solution step by step"]
+    verification: str = _ai["Verify your answer is correct"]
+    answer: str = _ai["State the final answer clearly"]
+    return answer
+
+result = solve_with_verification("What is the square root of 144?")
+print(f"Answer: {result}")
+
+# Get full reasoning with all=True
+full_result = solve_with_verification("What is the square root of 144?", all=True)
+print(f"\nUnderstanding: {full_result.understanding}")
+print(f"Approach: {full_result.approach}")
+print(f"Solution: {full_result.solution}")
+print(f"Verification: {full_result.verification}")
+print(f"Answer: {full_result.answer}")
+```
+
+    Answer: The square root of 144 is **12**.
+
+    Understanding: The problem is asking me to find the square root of 144. This means I need to find a number that, when multiplied by itself, equals 144.
+    Approach: To find the square root of 144, I can:
+    1. Recall perfect squares or calculate which number multiplied by itself equals 144
+    2. Verify the answer by squaring it to ensure it equals 144
+    3. Consider both positive and negative roots, though typically the principal (positive) square root is the standard answer
+    Solution: Let me find what number squared equals 144.
+
+    I'll check some perfect squares:
+    - 10² = 100 (too small)
+    - 11² = 121 (too small)
+    - 12² = 12 × 12 = 144 ✓
+
+    So 12 × 12 = 144
+
+    Therefore, √144 = 12
+    Verification: Let me verify: 12 × 12 = 144 ✓
+
+    I can also verify using the negative root: (-12) × (-12) = 144 ✓
+
+    The answer checks out correctly.
+    Answer: The square root of 144 is 12 (or ±12 if considering both positive and negative roots, though the principal square root is 12).
+
+## Example 4: Dynamic message construction
+
+Build messages dynamically based on input:
+
+```{python}
+from elemai import ai, _ai
+
+def build_custom_messages(fn_name, instruction, demos, **inputs):
+    """Build messages with custom logic"""
+    messages = [
+        {"role": "system", "content": f"You are performing: {instruction}"}
+    ]
+
+    # Add few-shot examples
+    for demo in demos:
+        messages.append({"role": "user", "content": demo['input']})
+        messages.append({"role": "assistant", "content": demo['output']})
+
+    # Add actual input
+    messages.append({"role": "user", "content": inputs.get('text', '')})
+
+    return messages
+
+@ai(messages=build_custom_messages)
+def dynamic_task(text: str) -> str:
+    """Task with dynamically built messages"""
+    return _ai
+
+demos = [
+    {"input": "Hello", "output": "Hi there!"},
+    {"input": "How are you?", "output": "I'm doing well, thanks!"},
+]
+
+result = dynamic_task("What's up?", demos=demos)
+print(result)
+```
+
+## Example 5: Few-shot learning with demos
+
+Use the demos parameter for in-context learning:
+
+```{python}
+from elemai import ai, _ai
+
+@ai
+def classify(text: str) -> str:
+    """Classify text sentiment"""
+    return _ai
+
+# Provide examples as demos
+demos = [
+    {"text": "I love this!", "sentiment": "positive"},
+    {"text": "This is terrible", "sentiment": "negative"},
+    {"text": "It's okay I guess", "sentiment": "neutral"},
+]
+
+result = classify("This is amazing!", demos=demos)
+print(f"Classification: {result}")
+
+# The demos are automatically included in the prompt
+print("\nWithout demos:")
+result_no_demos = classify("This is amazing!")
+print(f"Classification: {result_no_demos}")
+```
+
+    Classification: sentiment: positive
+
+    Without demos:
+    Classification: The sentiment of this text is **positive**.
+
+    The exclamation mark and the word "amazing" express enthusiasm and a strong favorable opinion.
+
+```{python}
+classify.render(text = "This is amazing!", demos=demos)
+```
+
+    'SYSTEM:\nClassify text into categories\n\nUSER:\ntext: This is amazing!'
+
+## Example 6: Conditional template expressions
+
+Use ternary conditionals to dynamically change prompts based on parameters:
+
+```{python}
+from elemai import ai, _ai
+
+# Full ternary: {condition ? "if_true" : "if_false"}
+# Short form: {condition ? "if_true"} (returns empty string if false)
+@ai(
+    messages=[
+        {"role": "system", "content": "You are helpful{urgent ? \" and respond IMMEDIATELY\" : \"\"}"},
+        {"role": "user", "content": "{warning ? \"WARNING: \" : \"\"}Analyze: {text}"},
+    ]
+)
+def analyze(text: str, warning: bool = False, urgent: bool = False) -> str:
+    """Analyze text with optional warning and urgency"""
+    return _ai
+
+# Normal mode
+result1 = analyze("Data shows growth")
+print(f"Normal: {result1[:50]}...")
+
+# With warning flag
+result2 = analyze("Data shows growth", warning=True)
+print(f"\nWith warning: {result2[:50]}...")
+
+# With urgent flag
+result3 = analyze("Data shows growth", urgent=True)
+print(f"\nWith urgent: {result3[:50]}...")
+
+# Preview to see the difference
+print("\n--- Template with warning=True ---")
+preview = analyze.preview(text="test", warning=True, urgent=False)
+print(f"User: {preview.messages[1]['content']}")
+
+# You can also use short form (no else clause)
+@ai(
+    messages=[
+        {"role": "user", "content": "{priority ? \"[PRIORITY] \"}{task}"}
+    ]
+)
+def process_task(task: str, priority: bool = False) -> str:
+    """Process a task with optional priority flag"""
+    return _ai
+
+preview = process_task.preview(task="Review document", priority=True)
+print(f"\n--- Short form example ---")
+print(f"User: {preview.messages[0]['content']}")
+```
+
+## Example 7: Inspection and debugging
+
+Inspect prompts and configuration before calling the LLM:
+
+```{python}
+from elemai import ai, _ai
+
+@ai
+def inspectable_task(text: str) -> str:
+    """A task we can inspect"""
+    thinking: str = _ai["Analyze carefully"]
+    return _ai
+
+# Preview the prompt
+preview = inspectable_task.preview(text="example input")
+print("Prompt that will be sent:")
+print(preview.prompt[:200] + "...")
+
+# See the messages
+print("\nMessages:")
+for i, msg in enumerate(preview.messages):
+    print(f"{i+1}. {msg['role']}: {msg['content'][:100]}...")
+
+# Check configuration
+print(f"\nModel: {preview.config.model}")
+print(f"Temperature: {preview.config.temperature}")
+```
+
+## Example 7: Reusable template sections
+
+Create reusable message components:
+
+```{python}
+from elemai import ai, _ai
+
+# Define reusable system message
+expert_system = {
+    "role": "system",
+    "content": "You are an expert with 20 years of experience."
+}
+
+def create_expert_task(instruction: str):
+    """Create a task with expert system prompt"""
+
+    @ai(
+        messages=[
+            expert_system,
+            {"role": "user", "content": "{inputs()}"},
+        ]
+    )
+    def expert_task(text: str) -> str:
+        return _ai
+
+    expert_task.__doc__ = instruction
+    return expert_task
+
+# Create specialized expert tasks
+medical_expert = create_expert_task("Provide medical analysis")
+legal_expert = create_expert_task("Provide legal analysis")
+
+result = medical_expert("Patient has persistent headaches")
+print(result)
+```
+
+## Example 8: Multi-step AI pipeline
+
+Chain multiple AI functions together:
+
+```{python}
+from elemai import ai, _ai
+
+@ai
+def extract_data(text: str) -> str:
+    """Extract structured data as JSON"""
+    return _ai
+
+@ai
+def validate_data(data: str) -> str:
+    """Validate extracted data and return 'valid' or 'invalid'"""
+    return _ai
+
+@ai
+def summarize_data(data: str) -> str:
+    """Summarize validated data"""
+    return _ai
+
+def pipeline_example(text: str):
+    """Multi-step AI pipeline"""
+    # Step 1: Extract
+    data = extract_data(text)
+    print(f"Extracted: {data[:100]}...")
+
+    # Step 2: Validate
+    is_valid = validate_data(data)
+    print(f"Validation: {is_valid}")
+
+    if "valid" in is_valid.lower():
+        # Step 3: Summarize
+        summary = summarize_data(data)
+        return summary
+    else:
+        return "Invalid data extracted"
+
+result = pipeline_example("John Smith, age 30, works as an engineer at TechCorp")
+print(f"\nFinal result: {result}")
+```
+
+## Example 9: Metadata and introspection
+
+Access function metadata and configuration:
+
+```{python}
+from elemai import ai, _ai
+
+@ai
+def analyze(text: str, detailed: bool = False) -> str:
+    """Analyze the text"""
+    return _ai
+
+# Access metadata
+print(f"Function name: {analyze.metadata['fn_name']}")
+print(f"Instruction: {analyze.metadata['instruction']}")
+print(f"Return type: {analyze.metadata['return_type']}")
+
+# Access input fields
+print("\nInput fields:")
+for field in analyze.metadata['input_fields']:
+    print(f"  - {field['name']}: {field['type'].__name__} (default: {field['default']})")
+
+# Access output fields
+print("\nOutput fields:")
+for field in analyze.metadata['output_fields']:
+    print(f"  - {field['name']}: {field['type'].__name__}")
+```
+
+## Example 10: Custom configuration per function
+
+Override configuration at function level:
+
+```{python}
+from elemai import ai, _ai
+
+@ai(model="claude-opus-4-20250514", temperature=0.0)
+def precise_task(text: str) -> str:
+    """Task requiring high precision"""
+    return _ai
+
+@ai(model="claude-haiku-4-20250514", temperature=0.7)
+def creative_task(text: str) -> str:
+    """Task requiring creativity"""
+    return _ai
+
+# Each function uses its own configuration
+print(f"Precise task model: {precise_task.config.model}")
+print(f"Creative task model: {creative_task.config.model}")
+```
+
+## Summary
+
+elemai's advanced features enable:
+
+- **Custom templates**: Full control over prompt structure
+- **Structured outputs**: Dataclasses and Pydantic models
+- **Multi-step reasoning**: Chain-of-thought with intermediate steps
+- **Dynamic messages**: Programmatic prompt construction
+- **Few-shot learning**: In-context examples via demos parameter
+- **Conditional expressions**: `{var ? "value" : "other"}` ternary syntax for dynamic prompts
+- **Inspection**: Debug and preview prompts
+- **Reusable components**: Share template sections
+- **Pipelines**: Chain multiple AI functions
+- **Metadata access**: Introspect function configuration
+- **Per-function config**: Fine-tune each task independently
+
+These patterns allow you to build sophisticated AI-powered applications with clean, maintainable code.

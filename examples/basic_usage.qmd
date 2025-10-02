@@ -71,6 +71,11 @@ print(f"Thinking: {full.thinking}")
 print(f"Result: {full.result}")
 ```
 
+    Result: positive
+
+    Thinking: The text "This is amazing" expresses enthusiasm and excitement. The word "amazing" is a strong positive adjective that conveys wonder, admiration, or delight. There are no negative words or qualifiers that would dampen the positive sentiment. This is a straightforward expression of positive emotion.
+    Result: positive
+
 ## Example 3: Structured output with Pydantic
 
 Return complex structured data using Pydantic models:
@@ -96,6 +101,10 @@ print(f"Themes: {result.themes}")
 print(f"Summary: {result.summary}")
 ```
 
+    Sentiment: positive
+    Themes: ['product satisfaction', 'innovation', 'design quality']
+    Summary: An enthusiastic endorsement of a product, highlighting its innovative nature and quality design.
+
 ## Example 4: Custom messages template
 
 Override the default template with your own messages:
@@ -105,16 +114,55 @@ from elemai import ai, _ai
 
 @ai(
     messages=[
-        {"role": "system", "content": "You are a helpful assistant"},
-        {"role": "user", "content": "Text: {text}\n\nPlease summarize this."},
+        {"role": "system", "content": "You are a helpful pirate. {instruction}"},
+        {"role": "user", "content": "Text: {inputs.text}\n\n"},
     ]
 )
 def custom_summarize(text: str) -> str:
-    """Summarize with custom template"""
+    """Summarize in 10 words"""
     return _ai
 
-result = custom_summarize("Long article about quantum computing...")
+result = custom_summarize("""It feels to me like foundation models (LLMs, SAM2, DINOv3) are now mature enough to use for collecting real-world data. My intuition is that they serve as the probabilistic engine we can use to build training sets from real-world data, which will provide truly new insights and understanding.
+
+For instance, a researcher in ecology might want to improve predictions of zebra eating behavior in relation to predator density. Concepts like zebra, eating, behavior, and predator are all discretizable, and data can now be collected using Gemini Pro 2.5, SAM, and DINOv3. We can then apply either machine learning, differential equation modeling or agent-based modeling to find the model(s) that best explain the observed data.
+
+If you then provide these models as tools to an LLM (probably with some retrieval strategy, because there will be millions of such tools), you effectively bootstrap an online learning system from a few key foundation models.""")
 print(result)
+```
+
+    Arrr! Foundation models help collect real-world data for scientific discovery, matey!
+
+## Example 4b: Conditional expressions in templates
+
+Use ternary conditionals to dynamically modify prompts:
+
+```{python}
+from elemai import ai, _ai
+
+@ai(
+    messages=[
+        {"role": "system", "content": "You are a helpful assistant{formal ? \" who speaks formally\" : \"\"}"},
+        {"role": "user", "content": "{urgent ? \"[URGENT] \" : \"\"}Question: {question}"},
+    ]
+)
+def ask_question(question: str, urgent: bool = False, formal: bool = False) -> str:
+    """Ask a question with optional urgency and formality"""
+    return _ai
+
+# Normal question
+print("Normal:")
+result = ask_question("What is AI?")
+print(result[:80] + "...")
+
+# Urgent question
+print("\nUrgent:")
+result = ask_question("What is AI?", urgent=True)
+print(result[:80] + "...")
+
+# Formal mode
+print("\nFormal:")
+result = ask_question("What is AI?", formal=True)
+print(result[:80] + "...")
 ```
 
 ## Example 5: Using template functions
@@ -150,6 +198,8 @@ result = structured_task(
 print(result)
 ```
 
+    sentiment='positive' themes=['product satisfaction', 'customer approval'] summary='A brief, enthusiastic customer review expressing satisfaction with a product.'
+
 ## Example 6: Assistant prefill
 
 Prefill the assistant's response to guide the output format:
@@ -161,7 +211,7 @@ from elemai import ai, _ai
     messages=[
         {"role": "system", "content": "You are concise"},
         {"role": "user", "content": "{text}"},
-        {"role": "assistant", "content": "Here's my analysis:\n\n1. "},
+        {"role": "assistant", "content": "Off course is is my analysis in 5 words:"},
     ]
 )
 def prefilled_analysis(text: str) -> str:
@@ -172,6 +222,15 @@ result = prefilled_analysis("The economy is growing steadily.")
 print(result)
 # Result will start with "Here's my analysis:\n\n1. ..."
 ```
+
+    **Strong fundamentals drive sustained expansion.**
+
+    This reflects:
+    - **Steady** = sustained, not volatile
+    - **Growing** = expansion is occurring
+    - **Fundamentals** = underlying economic factors
+    - **Strong** = positive momentum
+    - **Drive** = causing the growth
 
 ## Example 7: Chat mode
 
@@ -223,14 +282,22 @@ def solve_problem(problem: str) -> float:
 
 # Simple usage - just the answer
 answer = solve_problem("What is 15 * 23?")
-print(f"Answer: {answer}")
+print(f"Answer: {answer}") # should be the float value parsed in `answer`
 
 # Detailed usage - see the reasoning
 full = solve_problem("What is 15 * 23?", all=True)
 print(f"Understanding: {full.understanding}")
 print(f"Approach: {full.approach}")
-print(f"Answer: {full.result}")
+print(f"Answer: {full.answer}")
 ```
+
+    Answer: understanding: str
+    approach: str
+    answer: 345.0
+    Understanding: str
+    Approach: str
+    Answer: 345.0
+
 
 ## Example 10: Configuration override
 
@@ -354,7 +421,8 @@ elemai provides a clean, intuitive API for working with LLMs:
 - **Result object**: Nice representations in all contexts
 - **Chat class**: Stateful conversations
 - **Configuration**: Global, contextual, and per-function settings
-- **Templates**: Flexible prompt customization
+- **Templates**: Flexible prompt customization with conditionals `{var ? "yes" : "no"}`
 - **Preview**: Inspect prompts before sending
+- **Demos**: Few-shot learning examples
 
 This design is inspired by functai's function-is-the-prompt paradigm.

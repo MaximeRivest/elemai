@@ -280,6 +280,9 @@ class AIFunction:
                 description=field_dict.get('description')
             ))
 
+        # Extract demos before building context
+        demos = kwargs.pop('demos', [])
+
         context = {
             'fn_name': self.metadata['fn_name'],
             'instruction': self.metadata['instruction'],
@@ -288,8 +291,12 @@ class AIFunction:
             'input_fields': self.metadata['input_fields'],
             'output_fields': output_field_objs,
             'output_type': self.metadata['return_type'],
-            'demos': kwargs.pop('demos', []),
+            'demos': demos,
         }
+
+        # Also add individual input fields to context for direct access
+        # This allows templates to use {text} instead of {inputs.text}
+        context.update(kwargs)
 
         return context
 
@@ -339,10 +346,21 @@ class AIFunction:
                 # Extract fields from JSON
                 for field in output_fields:
                     if field['name'] in json_data:
-                        parsed[field['name']] = self._parse_to_type(
-                            str(json_data[field['name']]),
-                            field['type']
-                        )
+                        # For complex types (Pydantic models, dicts, lists), keep as-is
+                        # For simple types, convert to string for parsing
+                        value = json_data[field['name']]
+                        if isinstance(value, (dict, list)):
+                            # Pass complex types as JSON string to _parse_to_type
+                            parsed[field['name']] = self._parse_to_type(
+                                json.dumps(value),
+                                field['type']
+                            )
+                        else:
+                            # Simple values can be passed as-is
+                            parsed[field['name']] = self._parse_to_type(
+                                str(value) if not isinstance(value, str) else value,
+                                field['type']
+                            )
         except (json.JSONDecodeError, ValueError):
             pass
 
@@ -355,9 +373,15 @@ class AIFunction:
         # Create Result object
         result_obj = Result(**parsed)
 
-        # If return_all is False and we have a 'result' field, return just that
-        if not return_all and 'result' in parsed:
-            return parsed['result']
+        # If return_all is False, return just the final output field
+        if not return_all:
+            # First check for a field marked as final output
+            final_field = next((f for f in output_fields if f.get('is_final_output')), None)
+            if final_field and final_field['name'] in parsed:
+                return parsed[final_field['name']]
+            # Fallback: check for 'result' field for backward compatibility
+            elif 'result' in parsed:
+                return parsed['result']
 
         # Otherwise return the full Result object
         return result_obj
@@ -390,8 +414,10 @@ class AIFunction:
             rf'<{field_name}>(.*?)</{field_name}>',
             # Markdown headers: ## field_name \n value (using lookahead)
             rf'#{{1,6}}\s*{field_name}\s*\n(.*?)(?=\n#{{1,6}}|\Z)',
+            # Labeled with colon and optional type: field_name: type \n value
+            rf'{field_name}:\s*\w+\s*\n(.*?)(?=\n\w+:|$)',
             # Labeled with colon: field_name: value
-            rf'{field_name}:\s*(.*?)(?:\n\n|\n[A-Z#]|$)',
+            rf'{field_name}:\s*(.*?)(?:\n\n|\n[A-Z#]|\n\w+:|$)',
             # JSON-style quotes: "field_name": "value"
             rf'"{field_name}":\s*"(.*?)"',
             # **Markdown bold**: **field_name** value
@@ -445,29 +471,58 @@ class AIFunction:
         if target_type == bool:
             return text.lower() in ('true', 'yes', '1', 'correct')
 
-        # Try JSON parsing for complex types
+        # Try JSON parsing for complex types (Pydantic models, dataclasses, etc.)
         if hasattr(target_type, 'model_validate_json'):
-            # Pydantic model
+            # Pydantic model - try model_validate_json first
             try:
                 # Extract JSON if embedded in text
                 json_match = re.search(r'\{.*\}', text, re.DOTALL)
                 if json_match:
-                    return target_type.model_validate_json(json_match.group(0))
+                    json_str = json_match.group(0)
+                    # Try direct parsing first
+                    try:
+                        return target_type.model_validate_json(json_str)
+                    except Exception:
+                        # If that fails, check if JSON is wrapped in {"result": {...}}
+                        try:
+                            data = json.loads(json_str)
+                            if 'result' in data and isinstance(data['result'], dict):
+                                return target_type.model_validate(data['result'])
+                        except Exception:
+                            pass
                 else:
                     return target_type.model_validate_json(text)
-            except:
+            except Exception:
                 pass
 
-        # Try generic JSON parse
+        # Try Pydantic model_validate with parsed dict
+        if hasattr(target_type, 'model_validate'):
+            try:
+                json_match = re.search(r'\{.*\}', text, re.DOTALL)
+                if json_match:
+                    data = json.loads(json_match.group(0))
+                    # Check if wrapped in {"result": {...}}
+                    if 'result' in data and isinstance(data['result'], dict):
+                        return target_type.model_validate(data['result'])
+                    else:
+                        return target_type.model_validate(data)
+            except Exception:
+                pass
+
+        # Try generic JSON parse for dataclasses and other structured types
         try:
             json_match = re.search(r'\{.*\}|\[.*\]', text, re.DOTALL)
             if json_match:
                 data = json.loads(json_match.group(0))
                 if hasattr(target_type, '__annotations__'):
                     # Dataclass or similar
-                    return target_type(**data)
+                    # Check if wrapped in {"result": {...}}
+                    if 'result' in data and isinstance(data['result'], dict):
+                        return target_type(**data['result'])
+                    else:
+                        return target_type(**data)
                 return data
-        except:
+        except Exception:
             pass
 
         return text

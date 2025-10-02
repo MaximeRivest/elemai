@@ -256,16 +256,39 @@ class FunctionIntrospector:
                 })
 
         # Also check return statement
-        if 'return _ai' in self.source:
+        return_var = None
+        for line in lines:
+            line = line.strip()
+            if line.startswith('return '):
+                # Extract what's being returned
+                return_part = line[7:].strip()
+                if return_part == '_ai':
+                    return_var = 'result'  # Direct return of _ai
+                else:
+                    # Check if returning a variable that was assigned to _ai
+                    var_name = return_part.split()[0].strip('(),')
+                    if any(f['name'] == var_name for f in fields):
+                        return_var = var_name
+                break
+
+        # If we found a direct 'return _ai', ensure we have a 'result' field
+        if return_var == 'result':
             return_type = self.signature.return_annotation
             if return_type != inspect.Signature.empty:
-                # Check if we already have a 'result' field
                 if not any(f['name'] == 'result' for f in fields):
                     fields.append({
                         'name': 'result',
                         'type': return_type,
                         'description': None
                     })
+
+        # Mark which field is the final return value
+        if return_var and fields:
+            for field in fields:
+                if field['name'] == return_var:
+                    field['is_final_output'] = True
+                else:
+                    field['is_final_output'] = False
 
         return fields
 

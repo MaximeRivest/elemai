@@ -201,9 +201,28 @@ class TemplateFunctions:
         else:  # default
             lines = []
             for field in output_fields:
-                lines.append(f"{field.name}: {field.type.__name__}")
-                if field.description:
-                    lines.append(f"  {field.description}")
+                # For Pydantic models and other complex types, show the schema inline
+                if hasattr(field.type, 'model_json_schema'):
+                    # Pydantic model - show its schema
+                    schema = field.type.model_json_schema()
+                    schema_str = json.dumps(schema, indent=2)
+                    lines.append(f"{field.name}: {field.type.__name__}")
+                    if field.description:
+                        lines.append(f"  {field.description}")
+                    lines.append(f"  Schema: {schema_str}")
+                elif is_dataclass(field.type):
+                    # Dataclass - show its schema
+                    schema = self._type_to_schema(field.type)
+                    schema_str = json.dumps(schema, indent=2)
+                    lines.append(f"{field.name}: {field.type.__name__}")
+                    if field.description:
+                        lines.append(f"  {field.description}")
+                    lines.append(f"  Schema: {schema_str}")
+                else:
+                    # Simple type - just show the type name
+                    lines.append(f"{field.name}: {field.type.__name__}")
+                    if field.description:
+                        lines.append(f"  {field.description}")
             return '\n'.join(lines)
 
     def _render_schema(self, type_hint: type) -> str:
@@ -448,10 +467,14 @@ class MessageTemplate:
             >>> result
             'Hi Alice'
         """
-        # First pass: evaluate function calls {func(...)}
+        # First pass: evaluate conditionals {condition ? value_if_true : value_if_false}
+        content = self._eval_conditionals(content, context)
+
+        # Second pass: evaluate function calls {func(...)}
+        # This also escapes curly braces in the output to prevent .format() errors
         content = self._eval_functions(content, context)
 
-        # Second pass: simple variable substitution {var}
+        # Third pass: simple variable substitution {var}
         # Use safe substitution to avoid KeyError on missing variables
         try:
             content = content.format(**context)
@@ -460,6 +483,89 @@ class MessageTemplate:
             content = self._format_with_nested_access(content, context)
 
         return content
+
+    def _eval_conditionals(self, content: str, context: Dict[str, Any]) -> str:
+        """Evaluate conditional expressions {condition ? value_if_true : value_if_false}.
+
+        Supports:
+        - {var ? "text" : "other"}  - Full ternary with else
+        - {var ? "text"}             - Short form, returns empty string if false
+        - Nested variable access: {inputs.warning ? "Warning!" : ""}
+
+        Args:
+            content: Template content with conditionals
+            context: Variables for evaluation
+
+        Returns:
+            str: Content with conditionals evaluated
+
+        Example:
+            >>> from elemai.template import MessageTemplate
+            >>> template = MessageTemplate([])
+            >>> result = template._eval_conditionals("{x ? 'yes' : 'no'}", {'x': True})
+            >>> result
+            'yes'
+        """
+        # Pattern: {condition ? value_if_true : value_if_false} or {condition ? value_if_true}
+        # Use a simpler approach: match the whole conditional, then parse manually
+        pattern = r'\{([^?]+)\?([^}]+)\}'
+
+        def evaluate_condition(match):
+            condition_expr = match.group(1).strip()
+            rest = match.group(2).strip()
+
+            # Split by : but only if not inside quotes
+            # Simple approach: find the last : that's not inside quotes
+            true_value = ''
+            false_value = ''
+
+            # Check if there's a : separator
+            if ':' in rest:
+                # Find the separator : (not inside quotes)
+                in_quotes = False
+                quote_char = None
+                for i, char in enumerate(rest):
+                    if char in ('"', "'") and (i == 0 or rest[i-1] != '\\'):
+                        if not in_quotes:
+                            in_quotes = True
+                            quote_char = char
+                        elif char == quote_char:
+                            in_quotes = False
+                    elif char == ':' and not in_quotes:
+                        # Found the separator
+                        true_value = rest[:i].strip().strip('"\'')
+                        false_value = rest[i+1:].strip().strip('"\'')
+                        break
+                else:
+                    # No separator found outside quotes
+                    true_value = rest.strip().strip('"\'')
+            else:
+                # No else clause
+                true_value = rest.strip().strip('"\'')
+                false_value = ''
+
+            # Evaluate the condition
+            try:
+                # Handle nested access (e.g., inputs.warning)
+                if '.' in condition_expr:
+                    parts = condition_expr.split('.')
+                    value = context
+                    for part in parts:
+                        if isinstance(value, dict):
+                            value = value.get(part)
+                        else:
+                            value = getattr(value, part, None)
+                    condition = bool(value)
+                else:
+                    # Simple variable
+                    condition = bool(context.get(condition_expr))
+
+                return true_value if condition else false_value
+            except Exception:
+                # If evaluation fails, return empty string
+                return ''
+
+        return re.sub(pattern, evaluate_condition, content)
 
     def _eval_functions(self, content: str, context: Dict[str, Any]) -> str:
         """Find and evaluate {function(...)} calls.
@@ -490,7 +596,9 @@ class MessageTemplate:
                 # Parse and evaluate arguments
                 args, kwargs = self._parse_args(args_str, context)
                 result = self.functions.call(func_name, *args, **kwargs)
-                return str(result)
+                # Escape curly braces in the result so .format() doesn't try to interpret them
+                result_str = str(result).replace('{', '{{').replace('}', '}}')
+                return result_str
             except Exception:
                 # If function call fails, leave it as-is
                 return match.group(0)
@@ -624,35 +732,60 @@ class Templates:
         'system'
     """
 
-    simple = [
-        {"role": "system", "content": "{instruction}"},
-        {"role": "user", "content": "{inputs()}"}
-    ]
+    @staticmethod
+    def simple(**context):
+        """Simple template with optional demos support."""
+        messages = [{"role": "system", "content": "{instruction}"}]
 
-    reasoning = [
-        {"role": "system", "content": "{instruction}"},
-        {"role": "user", "content": "{inputs()}\n\nThink step by step."},
-        {"role": "assistant", "content": "Let me think through this:\n\n"}
-    ]
+        # Add demos if present
+        if context.get('demos'):
+            messages[0]['content'] += "\n\nExamples:\n{demos()}"
 
-    json_extraction = [
-        {
-            "role": "system",
-            "content": "Extract structured data as JSON.\n\nSchema:\n{outputs(style='schema')}"
-        },
-        {"role": "user", "content": "{inputs()}"}
-    ]
+        messages.append({"role": "user", "content": "{inputs()}"})
+        return messages
 
-    markdown_fields = [
-        {
-            "role": "system",
-            "content": "{instruction}\n\nProvide your response with clearly labeled fields:\n{outputs()}"
-        },
-        {
-            "role": "user",
-            "content": "{inputs()}\n\nRespond with each field clearly marked."
-        }
-    ]
+    @staticmethod
+    def reasoning(**context):
+        """Reasoning template with optional demos support."""
+        messages = [{"role": "system", "content": "{instruction}"}]
+
+        # Add demos if present
+        if context.get('demos'):
+            messages[0]['content'] += "\n\nExamples:\n{demos()}"
+
+        messages.extend([
+            {"role": "user", "content": "{inputs()}\n\nThink step by step."},
+            {"role": "assistant", "content": "Let me think through this:\n\n"}
+        ])
+        return messages
+
+    @staticmethod
+    def json_extraction(**context):
+        """JSON extraction template with optional demos support."""
+        content = "Extract structured data as JSON.\n\nSchema:\n{outputs(style='schema')}"
+
+        # Add demos if present
+        if context.get('demos'):
+            content += "\n\nExamples:\n{demos()}"
+
+        return [
+            {"role": "system", "content": content},
+            {"role": "user", "content": "{inputs()}"}
+        ]
+
+    @staticmethod
+    def markdown_fields(**context):
+        """Markdown fields template with optional demos support."""
+        content = "{instruction}\n\nProvide your response with clearly labeled fields:\n{outputs()}"
+
+        # Add demos if present
+        if context.get('demos'):
+            content += "\n\nExamples:\n{demos()}"
+
+        return [
+            {"role": "system", "content": content},
+            {"role": "user", "content": "{inputs()}\n\nRespond with each field clearly marked."}
+        ]
 
     structured = [
         {
