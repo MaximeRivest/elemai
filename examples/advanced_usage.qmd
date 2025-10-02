@@ -447,5 +447,250 @@ elemai's advanced features enable:
 - **Pipelines**: Chain multiple AI functions
 - **Metadata access**: Introspect function configuration
 - **Per-function config**: Fine-tune each task independently
+- **Complete template**: All features combined in one example
+- **Code-based output**: LLM generates executable Python code for maximum control
 
 These patterns allow you to build sophisticated AI-powered applications with clean, maintainable code.
+
+## Example 11: Complete Template - All Features Combined
+
+This example demonstrates every template feature in a single function:
+
+```{python}
+from elemai import ai, _ai
+from pydantic import BaseModel
+from typing import List
+
+class Analysis(BaseModel):
+    """Analysis response structure"""
+    category: str
+    confidence: float
+    key_points: List[str]
+    recommendation: str
+
+def format_inputs(inputs: dict, style: str = "detailed") -> str:
+    """Custom function to render inputs in different formats.
+
+    Args:
+        inputs: Dictionary of input field names and values
+        style: Rendering style - "detailed" or "simple"
+
+    Returns:
+        Formatted string representation of inputs
+
+    Examples:
+        >>> format_inputs({"text": "Hello", "context": "greeting"}, style="detailed")
+        === INPUTS ===
+        • TEXT: Hello
+        • CONTEXT: greeting
+        === END INPUTS ===
+
+        >>> format_inputs({"text": "Hello", "context": "greeting"}, style="simple")
+        text: Hello
+        context: greeting
+    """
+    if style == "detailed":
+        lines = ["=== INPUTS ==="]
+        for k, v in inputs.items():
+            lines.append(f"• {k.upper()}: {v}")
+        lines.append("=== END INPUTS ===")
+        return '\n'.join(lines)
+    return '\n'.join(f"{k}: {v}" for k, v in inputs.items())
+
+@ai(
+    model="groq/llama-3.3-70b-versatile",
+    temperature=0,
+    messages=[
+        # System message with conditional and template functions
+        {
+            "role": "system",
+            "content": """You are {expert_mode ? "an expert analyst with 20 years of experience" : "an analyst"}.
+
+Task: {instruction}
+
+Output JSON with this schema:
+{outputs(style='schema')}"""
+        },
+        # User message with custom function and conditional
+        {
+            "role": "user",
+            "content": """{format_inputs(inputs, style='detailed')}
+
+{priority ? "⚠️ HIGH PRIORITY - Respond immediately!" : ""}
+
+Provide analysis as JSON."""
+        }
+    ]
+)
+def complete_template_example(
+    text: str,
+    context: str,
+    priority: bool = False,
+    expert_mode: bool = True
+) -> Analysis:
+    """Complete template demonstrating all features"""
+    return _ai
+
+# Register custom template function
+complete_template_example.template.register_function('format_inputs', format_inputs)
+
+# Example usage
+result = complete_template_example(
+    text="Product launch exceeded expectations with 150% of target sales.",
+    context="Q4 business review",
+    priority=True,
+    expert_mode=True
+)
+print(f"Category: {result.category}")
+print(f"Confidence: {result.confidence}")
+print(f"Key Points: {result.key_points}")
+print(f"Recommendation: {result.recommendation[:80]}...")
+
+# Preview what gets sent to the LLM
+preview = complete_template_example.preview(
+    text="Sample",
+    context="Test",
+    priority=True,
+    expert_mode=True
+)
+print("\n--- System Message ---")
+print(preview.messages[0]['content'][:1000] + "...")
+```
+
+### Features Demonstrated:
+
+1. **Custom message templates** - Direct control over messages array
+2. **Conditional expressions** - `{expert_mode ? "expert" : "analyst"}` and `{priority ? "⚠️" : ""}`
+3. **Template functions** - `{instruction}`, `{outputs(style='schema')}`
+4. **Custom template functions** - `{format_inputs(inputs, style='detailed')}`
+5. **Pydantic structured output** - Automatic JSON parsing to `Analysis` model
+6. **Multiple parameters** - Flexible function signature
+7. **`.preview()` debugging** - Inspect rendered templates
+
+This example combines all the powerful features of elemai's template system in a real-world use case.
+
+## Example 12: Code-Based Output - LLM Generates Python Code
+
+Sometimes you want the LLM to see the exact class definition and output executable Python code. This pattern shows one way of doing that:
+
+```{python}
+from elemai import ai, _ai
+from pydantic import BaseModel
+from typing import List
+import inspect
+import re
+
+class Analysis(BaseModel):
+    category: str
+    confidence: float
+    key_points: List[str]
+    recommendation: str
+
+def format_output_as_code(output_type) -> str:
+    """Show the output class definition as Python code.
+
+    Returns:
+        String containing the class definition source code
+
+    Example output:
+        class Analysis(BaseModel):
+            category: str
+            confidence: float
+            key_points: List[str]
+            recommendation: str
+    """
+    return inspect.getsource(output_type)
+
+# Inner AI function that returns raw Python code
+@ai(
+    model="groq/llama-3.3-70b-versatile",
+    temperature=0,
+    messages=[
+        {
+            "role": "system",
+            "content": """Task: {instruction}
+
+You must output valid Python code that creates an instance of this class:
+
+{format_output_as_code(output_type)}
+
+Output ONLY the constructor call, for example:
+Analysis(category="success", confidence=0.95, key_points=["point1", "point2"], recommendation="Great work")"""
+        },
+        {
+            "role": "user",
+            "content": "Text: {text}\nContext: {context}"
+        }
+    ]
+)
+def _get_code_from_llm(text: str, context: str) -> str:
+    """Get Python code from LLM"""
+    return _ai
+
+# Register the custom template function
+_get_code_from_llm.template.register_function('format_output_as_code', format_output_as_code)
+
+# User-level wrapper that evaluates the code
+def code_based_analysis(text: str, context: str) -> Analysis:
+    """Get structured output by having LLM generate Python code.
+
+    This pattern:
+    1. Shows LLM the actual class definition (via inspect.getsource)
+    2. LLM outputs executable Python code
+    3. User code safely evaluates it with restricted scope
+
+    Args:
+        text: Text to analyze
+        context: Context for analysis
+
+    Returns:
+        Analysis instance created from LLM-generated code
+    """
+    # Get code from LLM
+    code_str = _get_code_from_llm(text=text, context=context)
+
+    # Extract the constructor call
+    pattern = r'Analysis\s*\([^)]*\)'
+    match = re.search(pattern, code_str, re.DOTALL)
+    code = match.group(0) if match else code_str.strip()
+
+    # Evaluate safely with restricted scope (only the types we provide)
+    local_vars = {'Analysis': Analysis, 'BaseModel': BaseModel, 'List': List}
+    result = eval(code, {"__builtins__": {}}, local_vars)
+
+    return result
+
+# Example usage
+result = code_based_analysis(
+    text="Product launch exceeded all expectations!",
+    context="Q4 review"
+)
+print(f"Category: {result.category}")
+print(f"Confidence: {result.confidence}")
+print(f"Key Points: {result.key_points}")
+print(f"Recommendation: {result.recommendation}")
+
+# Show what the LLM actually generated
+raw_code = _get_code_from_llm(
+    text="Sales dropped significantly",
+    context="Monthly report"
+)
+print(f"\nLLM generated code:\n{raw_code}")
+```
+
+### Key Concepts:
+
+1. **`inspect.getsource()`** - Shows LLM the actual class definition
+2. **Template function** - `{format_output_as_code(output_type)}` injects class source
+3. **Inner AI function** - Returns raw Python code string
+4. **Wrapper function** - User code that safely evaluates the LLM output
+5. **Restricted eval** - Only allowed types are available (`{"__builtins__": {}}`)
+6. **Pattern matching** - Extract just the constructor call from LLM output
+
+This pattern is useful when:
+- You want the LLM to see the exact class structure as code
+- You need fine-grained control over parsing
+- You're working with complex nested types
+- You want to validate/transform code before execution
+
+**Safety note**: Always use restricted `eval()` with `{"__builtins__": {}}` and only provide necessary types in the local scope.
