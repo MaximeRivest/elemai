@@ -8,7 +8,7 @@ def test_default_config():
     """Test default configuration"""
     config = Config()
 
-    assert config.model == "claude-sonnet-4-20250514"
+    assert config.model == "claude-sonnet-4-5-20250929"
     assert config.temperature == 0.7
 
 
@@ -62,9 +62,11 @@ def test_configure_context_manager():
 
 def test_model_aliases():
     """Test model alias resolution"""
-    # Claude 4 models
-    assert resolve_model("sonnet") == "claude-sonnet-4-20250514"
-    assert resolve_model("opus") == "claude-opus-4-20250514"
+    # Claude 4.5 and 4.x models
+    assert resolve_model("sonnet") == "claude-sonnet-4-5-20250929"
+    assert resolve_model("sonnet-4") == "claude-sonnet-4-20250514"
+    assert resolve_model("opus") == "claude-opus-4-1-20250805"
+    assert resolve_model("opus-4") == "claude-opus-4-20250514"
     assert resolve_model("haiku") == "claude-3-5-haiku-20241022"
 
     # OpenAI models

@@ -38,7 +38,7 @@ class Config:
         0.3
     """
 
-    model: str = "claude-sonnet-4.5"
+    model: str = "claude-sonnet-4-5-20250929"
     temperature: float = 0.7
     max_tokens: Optional[int] = None
     api_key: Optional[str] = None
@@ -106,7 +106,7 @@ def get_config() -> Config:
         >>> # Create a fresh config to show default
         >>> fresh_config = Config()
         >>> fresh_config.model
-        'claude-sonnet-4.5'
+        'claude-sonnet-4-5-20250929'
     """
     return _global_config
 
@@ -168,10 +168,12 @@ def configure(**kwargs):
 # Model aliases for convenience
 # Based on latest models as of 2025
 MODEL_ALIASES = {
-    # Claude 4.5 (latest)
-    'sonnet': 'claude-sonnet-4.5',
-    'opus': 'claude-opus-4.5',
-    'haiku': 'claude-haiku-4.5',
+    # Claude 4.5 and 4.x (latest)
+    'sonnet': 'claude-sonnet-4-5-20250929',  # Latest Sonnet 4.5
+    'sonnet-4': 'claude-sonnet-4-20250514',   # Sonnet 4
+    'opus': 'claude-opus-4-1-20250805',       # Latest Opus 4.1
+    'opus-4': 'claude-opus-4-20250514',       # Opus 4
+    'haiku': 'claude-3-5-haiku-20241022',     # Latest Haiku 3.5 (no 4.x yet)
 
     # OpenAI GPT models
     'gpt4o': 'gpt-4o',
@@ -200,7 +202,11 @@ def resolve_model(model: str) -> str:
 
     Example:
         >>> resolve_model("sonnet")
-        'claude-sonnet-4.5'
+        'claude-sonnet-4-5-20250929'
+        >>> resolve_model("opus")
+        'claude-opus-4-1-20250805'
+        >>> resolve_model("haiku")
+        'claude-3-5-haiku-20241022'
         >>> resolve_model("gpt4o")
         'gpt-4o'
         >>> resolve_model("my-custom-model")  # Unknown alias passes through
