@@ -1,0 +1,415 @@
+---
+title: "elemai Design Vision & Philosophy"
+format:
+  html:
+    code-fold: false
+    toc: true
+  md:
+    variant: gfm
+---
+
+# Design Philosophy
+
+## Core Principle: Maximal Useful Defaults
+
+The most productive library provides:
+
+1. **The shortest path to value** for the most common use case
+2. **Graceful complexity expansion** as needs evolve
+3. **Sensible defaults that rarely need changing**
+4. **Progressive disclosure** - add complexity only when needed
+
+## Two Fundamental Modes
+
+### Chat Mode (Stateful Conversation)
+- Maintains history automatically
+- Interactive, human-in-loop
+- Exploratory, iterative
+
+### Task Mode (Functional/Programmatic)
+- Stateless by default
+- Deterministic, repeatable
+- Production-oriented
+
+# The Function-is-the-Prompt Paradigm
+
+**Core insight from FunctAI**: The function definition IS the prompt, and the function body IS the program definition.
+
+## Basic Usage
+
+```{python}
+from elemai import ai, _ai
+
+@ai(model="openai/gpt-4.1")
+def summarize(text: str) -> str:
+    """Summarize the text in one concise sentence"""
+    return _ai
+
+# Just call it like a normal function
+result = summarize("""
+FunctAI allows you to treat AI models as reliable, typed Python functions,
+abstracting away the complexities of prompt engineering and output parsing.
+The function definition is the prompt, and the function body is the program.
+""")
+print(result)
+```
+
+
+```{python}
+from elemai import ai, _ai
+
+@ai(model="groq/llama-3.3-70b-versatile")
+def summarize(text: str) -> str:
+    """Summarize the text in one concise sentence"""
+    return _ai
+
+# Just call it like a normal function
+result = summarize("""
+FunctAI allows you to treat AI models as reliable, typed Python functions,
+abstracting away the complexities of prompt engineering and output parsing.
+The function definition is the prompt, and the function body is the program.
+""")
+print(result)
+```
+
+
+## Multi-Step Reasoning
+
+Variable names + type hints + descriptions = automatic structure
+
+```{python}
+from elemai import ai, _ai, configure
+
+@ai(model = "groq/llama-3.3-70b-versatile", temperature = 0)
+def solve_problem(question: str) -> float:
+    """Solve a math word problem"""
+
+    reasoning: str = _ai["Think through this step by step"]
+    approach: str = _ai["Explain your approach"]
+
+    # Final answer
+    return _ai
+
+# Normal call returns just the answer
+answer = solve_problem("If a train travels 120 miles in 2 hours, what is its speed?")
+print(f"Answer: {answer}")
+
+# Get ALL the intermediate steps
+full = solve_problem("If a train travels 120 miles in 2 hours, what is its speed?", all=True)
+print(f"\nReasoning: {full.reasoning}")
+print(f"Approach: {full.approach}")
+print(f"Answer: {full.result}")
+```
+
+## Structured Outputs
+
+```{python}
+from elemai import ai, _ai
+from pydantic import BaseModel
+
+class Analysis(BaseModel):
+    sentiment: str
+    themes: list[str]
+    action_items: list[str]
+
+@ai
+def analyze_feedback(text: str) -> Analysis:
+    """Analyze customer feedback for insights"""
+    thinking: str = _ai["Consider the key aspects"]
+    return _ai
+
+result = analyze_feedback("The product is great but shipping took forever")
+print(f"Sentiment: {result.sentiment}")
+print(f"Themes: {result.themes}")
+print(f"Action items: {result.action_items}")
+```
+
+# Template System: Controllable yet Ergonomic
+
+## Key Requirements
+
+1. **Direct message control** - users define standard OpenAI message format
+2. **String interpolation** - use `{variables}` for dynamic content
+3. **Template functions** - Python functions for custom rendering
+4. **Not magical** - always inspectable and overridable
+
+## Custom Message Templates
+
+```{python}
+from elemai import ai, _ai
+
+@ai(
+    messages=[
+        {
+            "role": "system",
+            "content": "You are an expert analyst. {instruction}"
+        },
+        {
+            "role": "user",
+            "content": "INPUT: {text}\n\nPlease analyze this carefully."
+        }
+    ]
+)
+def analyze(text: str) -> str:
+    """Analyze text for key insights"""
+    return _ai
+
+result = analyze("This product exceeded all expectations!")
+print(result)
+```
+
+## Template Functions for Input/Output Fields
+
+Rather than hardcoding field names, use template functions:
+
+```{python}
+from elemai import ai, _ai
+
+
+@ai(model = "groq/llama-3.3-70b-versatile", temperature = 0,
+    messages=[
+        {
+            "role": "system",
+            "content": "Task: {instruction}\n\nExpected outputs:\n{outputs(style='schema')}"
+        },
+        {
+            "role": "user",
+            "content": "{inputs(style='yaml')}"
+        }
+    ]
+)
+def classify(text: str, context: str) -> str:
+    """Classify text into categories"""
+    thinking: str = _ai["Analyze the text"]
+    return _ai
+
+# The template functions automatically handle all fields
+result = classify(
+    text="I love this product!",
+    context="customer review"
+)
+print(result)
+```
+
+## Built-in Template Functions
+
+Available in all message templates:
+
+- `{inputs()}` - Auto-render all input fields
+- `{inputs(style='yaml')}` - YAML format
+- `{inputs(style='json')}` - JSON format
+- `{inputs(exclude=['context'])}` - Exclude fields
+- `{outputs()}` - All output fields with descriptions
+- `{outputs(style='schema')}` - As JSON schema
+- `{schema(Type)}` - Schema for specific type
+- `{demos(format='yaml')}` - Render few-shot demos
+
+## Assistant Prefill
+
+Control LLM output by prefilling the assistant message:
+
+```{python}
+from elemai import ai, _ai
+
+@ai(model = "groq/llama-3.3-70b-versatile", temperature = 0,
+    messages=[
+        {"role": "system", "content": "You are concise"},
+        {"role": "user", "content": "{text}"},
+        {
+            "role": "assistant",
+            "content": "Here's my analysis in 5 words:"
+        }
+    ]
+)
+def concise_analysis(text: str) -> str:
+    """Brief analysis"""
+    return _ai
+
+result = concise_analysis("The economy is growing steadily")
+print(result)
+```
+
+## Few-Shot Learning with Demos
+
+```{python}
+from elemai import ai, _ai
+
+@ai(model = "groq/llama-3.3-70b-versatile", temperature = 0)
+def classify(text: str) -> str:
+    """Classify text sentiment"""
+    return _ai
+
+# Provide examples as demos
+demos = [
+    {"text": "I love this!", "sentiment": "positive"},
+    {"text": "This is terrible", "sentiment": "negative"},
+    {"text": "It's okay I guess", "sentiment": "neutral"}
+]
+
+result = classify("This is amazing!", demos=demos)
+print(f"Classification: {result}")
+```
+
+## Custom Template Functions
+
+Define your own rendering logic:
+
+```{python}
+from elemai import ai, _ai
+
+# Custom template function
+def render_with_emphasis(inputs: dict, highlight: list[str] = None) -> str:
+    """Render inputs with highlighted fields"""
+    lines = []
+    for k, v in inputs.items():
+        if highlight and k in highlight:
+            lines.append(f">>> {k.upper()}: {v}")
+        else:
+            lines.append(f"    {k}: {v}")
+    return '\n'.join(lines)
+
+@ai(model = "groq/llama-3.3-70b-versatile", temperature = 0,
+    messages=[
+        {"role": "system", "content": "Analyze carefully"},
+        {"role": "user", "content": "{render_with_emphasis(inputs, highlight=['text'])}"}
+    ]
+)
+def highlighted_analysis(text: str, context: str) -> str:
+    """Analysis with highlighted inputs"""
+    return _ai
+
+# Register the custom function
+highlighted_analysis.template.register_function('render_with_emphasis', render_with_emphasis)
+
+result = highlighted_analysis(
+    text="This is important",
+    context="background info"
+)
+print(result)
+```
+
+# Chat Mode Design
+
+```{python}
+from elemai import Chat
+
+# Simple stateful chat
+chat = Chat(system="You are a helpful assistant")
+
+response1 = chat("My name is Alice")
+print(f"Bot: {response1}")
+
+response2 = chat("What's my name?")
+print(f"Bot: {response2}")  # Will remember: "Your name is Alice"
+```
+
+## Chat with Custom Configuration
+
+```{python}
+from elemai import Chat
+
+chat = Chat(
+    model="claude-opus-4-20250514",
+    temperature=0.3,
+    system="You are very precise"
+)
+
+result = chat("Explain quantum computing in one sentence")
+print(result)
+```
+
+# Design Principles
+
+## 1. Convention over Configuration
+- Model selection: `"sonnet"` not `"claude-sonnet-4-20250929"`
+- Smart defaults that work 95% of the time
+- Override only what you need
+
+## 2. String-First Philosophy
+```python
+# Input and output are strings by default
+response = chat("message")  # Returns string
+print(response)  # Just works
+```
+
+## 3. No String Wrangling
+```python
+# Bad (other libraries)
+class Summarize(dspy.Signature):
+    """Summarize text"""
+    text = dspy.InputField()
+    summary = dspy.OutputField()
+
+# Good (elemai)
+@ai
+def summarize(text: str) -> str:
+    """Summarize text"""
+    return _ai
+```
+
+## 4. Always Inspectable
+```python
+# See what the template does
+print(task.messages)
+print(task.render(text="example"))
+print(task.to_messages(text="example"))
+```
+
+## 5. Progressively Customizable
+```python
+# Level 1: Just works
+@ai
+def task(input: str) -> str:
+    return _ai
+
+# Level 2: Add reasoning
+@ai
+def task(input: str) -> str:
+    thinking: str = _ai["Think step by step"]
+    return _ai
+
+# Level 3: Custom messages
+@ai(messages=[...])
+def task(input: str) -> str:
+    return _ai
+```
+
+# Key Innovations
+
+## 1. The `_ai` Sentinel
+- Marks LLM-generated outputs
+- Supports subscript notation for descriptions: `_ai["Think carefully"]`
+- Acts as placeholder for expected return type
+
+## 2. Message Templates with Interpolation
+- Direct control over OpenAI message format
+- String interpolation with `{variables}`
+- Template functions for dynamic rendering
+- Support for assistant prefill
+
+## 3. Unified Chat and Task Modes
+- Same template system for both modes
+- Tasks can be used in chat
+- Consistent configuration across modes
+
+## 4. Automatic Field Handling
+- Template functions like `{inputs()}` and `{outputs()}`
+- No need to hardcode field names
+- Symmetric handling of inputs and outputs
+
+## 5. Few-Shot Learning Built-in
+- Demos parameter for in-context learning
+- Automatic integration into templates
+- Works with all template styles
+
+# Vision Summary
+
+**The library should feel like talking to an LLM, not programming one.**
+
+Users should write what they mean, not configure an abstraction. The interface is clean Python - functions, type hints, docstrings - with the power of full template control when needed.
+
+- **95% of cases**: Just use `@ai` decorator with minimal code
+- **4% of cases**: Add custom messages template
+- **1% of cases**: Define custom template functions
+
+Everything is inspectable, debuggable, and progressively customizable.
